@@ -1,0 +1,17 @@
+{
+  "name": "crossword-multiplayer",
+  "version": "1.0.0",
+  "description": "Multiplayer crossword game — refactored MVC structure",
+  "type": "module",
+  "main": "server/server.js",
+  "scripts": {
+    "start":   "node server/server.js",
+    "dev":     "node --watch server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

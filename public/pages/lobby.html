@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crossword — Lobby</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/main.css" />
+  <link rel="stylesheet" href="/css/lobby.css" />
+  <link rel="stylesheet" href="/css/pixel-art.css" />
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+<div id="pixel-cursor"></div>
+
+<!-- ══ Lobby pixel-avatar overlay ══ -->
+<div class="overlay-backdrop hidden pixel-art-open" id="lobby-pixel-overlay">
+  <div class="overlay-card" style="max-width:660px;padding:32px 56px 28px 32px">
+    <div class="section-label" style="margin-bottom:12px">Draw your avatar</div>
+    <div id="lobby-canvas-slot"></div>
+    <div class="overlay-footer" style="margin-top:8px">
+      <button class="btn-ghost" id="lobby-pixel-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="lobby-pixel-save-btn">Save avatar →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Shared pixel-draw block ══ -->
+<div id="pixel-draw-block" style="display:none"></div>
+
+<!-- ══ Map browser overlay ══ -->
+<div class="overlay-backdrop hidden" id="map-browser-overlay">
+  <div class="map-browser-card">
+    <div class="overlay-title" style="margin-bottom:14px">Browse puzzles</div>
+    <div class="map-browser-filters" id="map-browser-filters"></div>
+    <div class="map-browser-grid" id="map-browser-grid"></div>
+    <div class="overlay-footer">
+      <button class="btn-ghost" id="map-browser-close-btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Start-anyway confirm overlay ══ -->
+<div class="overlay-backdrop hidden" id="start-anyway-overlay">
+  <div class="overlay-card" style="max-width:360px;padding:32px 28px">
+    <div class="overlay-title" style="margin-bottom:8px;font-size:18px">Not everyone voted</div>
+    <p class="overlay-sub2" id="start-anyway-msg">Some players haven't voted yet. Start the game anyway?</p>
+    <div class="overlay-row" style="justify-content:flex-end">
+      <button class="btn-ghost" id="start-anyway-wait-btn">Wait</button>
+      <button class="btn-primary" id="start-anyway-confirm-btn">Start anyway →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Leave lobby confirm overlay ══ -->
+<div class="overlay-backdrop hidden" id="leave-lobby-overlay">
+  <div class="overlay-card" style="max-width:360px;padding:32px 28px">
+    <div class="overlay-title" style="margin-bottom:8px;font-size:18px">Leave lobby?</div>
+    <p class="overlay-sub2">You'll be taken back to the home screen.</p>
+    <div class="overlay-row" style="justify-content:flex-end">
+      <button class="btn-ghost" id="leave-lobby-cancel-btn">Stay</button>
+      <button class="btn-primary" id="leave-lobby-confirm-btn" style="background:#e05151">Leave →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Player context menu ══ -->
+<div class="ctx-menu" id="player-ctx-menu">
+  <div class="ctx-menu-item" id="player-ctx-give-host">Give host</div>
+  <div class="ctx-menu-item danger" id="player-ctx-kick">Kick player</div>
+</div>
+
+<!-- ══ Lobby page ══ -->
+<div class="page" id="lobby-page">
+
+  <!-- Top bar -->
+  <header class="lobby-header">
+    <button class="btn-ghost" id="leave-lobby-btn">
+      <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      Leave
+    </button>
+
+    <div style="text-align:center">
+      <div class="lobby-title">Voting Room</div>
+      <div class="lobby-subtitle" id="lobby-subtitle">
+        Waiting for players to join<span id="waiting-dots"></span>
+      </div>
+    </div>
+
+    <!-- Code banner (top-right) -->
+    <div style="background:var(--banner-bg);border:0.5px solid var(--border);border-radius:8px;
+                padding:8px 12px;display:inline-flex;align-items:center;gap:8px">
+      <div>
+        <div class="banner-label" style="margin-bottom:3px">Lobby Code</div>
+        <div class="banner-code-wrap">
+          <span class="banner-code" id="lobby-banner-code" style="font-size:16px;letter-spacing:.18em"></span>
+          <div class="banner-reveal-overlay hidden" id="banner-reveal-overlay"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:5px;align-items:center;flex-shrink:0">
+        <button class="code-hide-btn" id="code-hide-btn" title="Toggle code visibility">
+          <svg id="eye-icon"     viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          <svg id="eye-off-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+        </button>
+        <button class="banner-copy" id="banner-copy-btn">
+          <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span id="banner-copy-label">Copy link</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <hr class="lobby-divider" />
+
+  <!-- Two-column layout -->
+  <div class="waiting-layout">
+
+    <!-- LEFT: identity + player list + chat -->
+    <div class="waiting-left">
+
+      <!-- Identity editor -->
+      <div class="identity-editor" id="identity-editor">
+        <div class="identity-row">
+          <div class="identity-avatar" id="lobby-avatar" title="Click to draw your avatar"></div>
+          <input class="identity-name-input" id="lobby-name-input" type="text"
+                 maxlength="20" placeholder="Your name" />
+        </div>
+        <div class="identity-swatches" id="lobby-swatches"></div>
+
+        <!-- Locked overlay shown after voting -->
+        <div class="identity-locked-overlay" id="identity-locked-overlay">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--text3)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span style="font-size:11px;color:var(--text3);letter-spacing:.04em;text-align:center;padding:0 8px">
+            Unlock vote to access customization
+          </span>
+        </div>
+      </div>
+
+      <div class="section-label" style="margin-top:4px">
+        Players (<span id="player-count">0</span>)
+      </div>
+      <div class="player-list" id="player-list"></div>
+
+      <!-- Lobby chat -->
+      <div class="waiting-chat" style="margin-top:20px">
+        <div class="chat-header">Chat</div>
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-empty" id="chat-empty"></div>
+        </div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chat-input" type="text"
+                 maxlength="200" placeholder="Say something…" />
+          <button class="chat-send" id="chat-send" disabled>↑</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vertical divider -->
+    <div class="waiting-divider"></div>
+
+    <!-- RIGHT: game mode + vote + start -->
+    <div class="waiting-middle">
+
+      <div style="position:relative">
+        <!-- Game-in-progress lock overlay -->
+        <div id="game-panels-lock-overlay"
+             style="display:none;position:absolute;inset:0;z-index:20;border-radius:10px;
+                    backdrop-filter:blur(4px);background:rgba(20,20,20,0.55);
+                    align-items:center;justify-content:center;flex-direction:column;gap:8px;pointer-events:all">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--text3)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span style="font-size:12px;color:var(--text3);letter-spacing:.04em;text-align:center;padding:0 16px">
+            Locked while game is active
+          </span>
+        </div>
+
+        <!-- Game mode panel -->
+        <div style="background:var(--card-bg);border:0.5px solid var(--border);border-radius:10px;
+                    margin-bottom:12px;overflow:hidden">
+          <div style="padding:8px 14px;border-bottom:0.5px solid var(--border);background:var(--bg3)">
+            <span class="section-label" style="margin-bottom:0">Game mode</span>
+          </div>
+          <div style="padding:12px 14px;position:relative">
+            <div id="lobby-mode-selector" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div class="mode-card" id="mode-card-together">
+                <div class="mode-card-title">Play Together</div>
+                <div class="mode-card-desc">Collaborate to fill the grid as a team.</div>
+              </div>
+              <div class="mode-card" id="mode-card-versus">
+                <div class="mode-card-title">Versus</div>
+                <div class="mode-card-desc">Race to complete the puzzle first. Your grid is private.</div>
+              </div>
+            </div>
+            <!-- Non-host lock -->
+            <div id="mode-nonhost-overlay"
+                 style="display:none;position:absolute;inset:0;background:rgba(20,20,20,0.72);
+                        border-radius:8px;backdrop-filter:blur(2px);z-index:10;
+                        align-items:center;justify-content:center;flex-direction:column;gap:5px;pointer-events:all">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--text3)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span style="font-size:11px;color:var(--text3);letter-spacing:.04em;text-align:center">
+                Only the host can change the game mode
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Vote for a puzzle panel -->
+        <div style="background:var(--card-bg);border:0.5px solid var(--border);border-radius:10px;overflow:hidden">
+          <div style="padding:8px 14px;border-bottom:0.5px solid var(--border);background:var(--bg3)">
+            <span class="section-label" style="margin-bottom:0">Vote for a puzzle</span>
+          </div>
+          <div style="position:relative">
+            <div id="vote-selector-card" style="padding:12px 14px">
+              <div style="margin-bottom:12px">
+                <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Size</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="filter-chip lobby-size-btn active" data-size="standard"
+                          style="font-size:11px;padding:4px 10px">Standard 15×15</button>
+                  <button class="filter-chip lobby-size-btn" data-size="large"
+                          style="font-size:11px;padding:4px 10px">Large 21×21</button>
+                </div>
+              </div>
+              <div id="lobby-diff-row">
+                <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Difficulty</div>
+                <div id="lobby-diff-standard" style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="filter-chip lobby-diff-btn" data-diff="easy"   style="font-size:11px;padding:4px 10px">Easy</button>
+                  <button class="filter-chip lobby-diff-btn active" data-diff="medium" style="font-size:11px;padding:4px 10px">Medium</button>
+                  <button class="filter-chip lobby-diff-btn" data-diff="hard"   style="font-size:11px;padding:4px 10px">Hard</button>
+                </div>
+                <div id="lobby-diff-large" style="display:none;gap:6px;flex-wrap:wrap">
+                  <button class="filter-chip active" style="font-size:11px;padding:4px 10px;pointer-events:none;opacity:0.75">Medium</button>
+                </div>
+              </div>
+              <div id="vote-btn-wrap" style="display:none"></div>
+            </div>
+          </div>
+          <div id="vote-grid" style="display:flex;flex-direction:column;gap:6px;padding:0 2px 0;"></div>
+        </div>
+      </div>
+
+      <!-- Start / join button -->
+      <div id="start-btn-wrap"></div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Firebase must initialise before the page controller -->
+<script type="module" src="/js/firebase.js"></script>
+<script type="module" src="/js/controllers/lobby.controller.js"></script>
+</body>
+</html>

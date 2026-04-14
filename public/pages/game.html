@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crossword — Game</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/main.css" />
+  <link rel="stylesheet" href="/css/game.css" />
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<!-- ══ Mid-game join identity overlay ══ -->
+<div class="overlay-backdrop hidden" id="midgame-join-overlay" style="z-index:500">
+  <div class="overlay-card" style="max-width:400px;padding:32px 28px">
+    <div class="overlay-title" style="margin-bottom:6px">Join the game</div>
+    <div class="overlay-sub2">Pick a name and color before you start playing.</div>
+    <div style="margin-bottom:16px">
+      <label class="field-label" for="midgame-name">Your name</label>
+      <input class="name-input" id="midgame-name" type="text" maxlength="20" placeholder="Wordsmith42" />
+      <div class="field-error" id="midgame-name-error">Please enter a name.</div>
+    </div>
+    <div style="margin-bottom:24px">
+      <label class="field-label">Your color</label>
+      <div class="color-swatches" id="midgame-color-swatches"></div>
+    </div>
+    <div class="overlay-row" style="justify-content:flex-end">
+      <button class="btn-primary" id="midgame-join-confirm-btn">Let's play →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ In-game rename overlay ══ -->
+<div class="overlay-backdrop hidden" id="game-rename-overlay" style="z-index:600">
+  <div class="overlay-card" style="max-width:340px;padding:28px 24px">
+    <div class="overlay-title" style="margin-bottom:6px;font-size:18px">Change profile</div>
+    <div style="margin-bottom:16px">
+      <label class="field-label" for="game-rename-input">Name</label>
+      <input id="game-rename-input" class="name-input" type="text" maxlength="20" placeholder="Your name" />
+    </div>
+    <div style="margin-bottom:20px">
+      <label class="field-label">Color</label>
+      <div class="color-swatches" id="game-rename-swatches"></div>
+    </div>
+    <div class="overlay-footer">
+      <button class="btn-ghost" id="game-rename-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="game-rename-save-btn">Save →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Reveal grid confirm ══ -->
+<div class="overlay-backdrop hidden" id="reveal-grid-overlay" style="z-index:700">
+  <div style="background:var(--overlay-bg);border:1px solid var(--border2);border-radius:16px;
+              padding:32px 28px;max-width:360px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,0.5)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#d4a017" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Reveal entire grid?</div>
+    </div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:24px">
+      This will show all answers to every player and cannot be undone.
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn-ghost" id="reveal-grid-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="reveal-grid-confirm-btn" style="background:#d4a017;color:#000">Reveal grid →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Generic action confirm overlay ══ -->
+<div class="overlay-backdrop hidden" id="action-confirm-overlay" style="z-index:700">
+  <div style="background:var(--overlay-bg);border:1px solid var(--border2);border-radius:16px;
+              padding:32px 28px;max-width:360px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,0.5)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#d4a017" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div id="action-confirm-title" style="font-size:16px;font-weight:700;color:var(--text)">Are you sure?</div>
+    </div>
+    <div id="action-confirm-body" style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:24px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn-ghost" id="action-confirm-cancel-btn">Cancel</button>
+      <button id="action-confirm-btn" class="btn-primary">Confirm →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Forfeit confirm ══ -->
+<div class="overlay-backdrop hidden" id="forfeit-confirm-overlay" style="z-index:700">
+  <div style="background:var(--overlay-bg);border:1px solid var(--border2);border-radius:16px;
+              padding:32px 28px;max-width:360px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,0.5)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#e05151" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div style="font-size:16px;font-weight:700;color:var(--text)">Forfeit the match?</div>
+    </div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:24px">
+      Are you sure you want to forfeit the match for all players? The game will end immediately.
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn-ghost" id="forfeit-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="forfeit-confirm-btn" style="background:#e05151;color:#fff">Forfeit →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Back to lobby confirm ══ -->
+<div class="overlay-backdrop hidden" id="back-to-lobby-confirm-overlay" style="z-index:610">
+  <div class="overlay-card" style="max-width:360px;padding:32px 28px">
+    <div class="overlay-title" style="margin-bottom:8px;font-size:18px">Go back to lobby?</div>
+    <p class="overlay-sub2">You'll return to the lobby. You can join back.</p>
+    <div class="overlay-row" style="justify-content:flex-end">
+      <button class="btn-ghost" id="back-to-lobby-stay-btn">Stay</button>
+      <button class="btn-primary" id="back-to-lobby-confirm-btn">Go to lobby →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Leave game confirm ══ -->
+<div class="overlay-backdrop hidden" id="leave-confirm-overlay" style="z-index:610">
+  <div class="overlay-card" style="max-width:360px;padding:32px 28px">
+    <div class="overlay-title" style="margin-bottom:8px;font-size:18px">Quit game?</div>
+    <p class="overlay-sub2">Your progress will be lost if you quit now.</p>
+    <div class="overlay-row" style="justify-content:flex-end">
+      <button class="btn-ghost" id="leave-game-stay-btn">Stay</button>
+      <button class="btn-primary" id="leave-game-confirm-btn" style="background:#e05151;border-color:#e05151">Leave →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Autocheck confirm ══ -->
+<div class="overlay-backdrop hidden" id="autocheck-confirm-overlay">
+  <div class="overlay-card" style="max-width:340px;padding:28px 24px">
+    <div class="overlay-title" style="margin-bottom:6px;font-size:18px">Enable autocheck?</div>
+    <p class="overlay-sub2" id="autocheck-confirm-body">Autocheck will reveal incorrect letters in real time for all players.</p>
+    <div class="overlay-row" style="justify-content:flex-end">
+      <button class="btn-ghost" id="autocheck-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="autocheck-confirm-btn">Enable</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Game-over overlay ══ -->
+<div class="overlay-backdrop hidden" id="game-over-overlay">
+  <div class="overlay-card" style="max-width:520px;text-align:center;padding:40px 32px;display:flex;flex-direction:column;align-items:center">
+    <div id="game-over-winner-avatar"
+         style="width:60px;height:60px;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;
+                font-size:22px;font-weight:700;color:#fff;background-size:cover;background-position:center;border:3px solid #d4a017;"></div>
+    <div class="overlay-title" style="margin-bottom:4px" id="game-over-title">Game Ended</div>
+    <div style="font-size:13px;color:var(--text4);margin-bottom:24px" id="game-over-subtitle">The grid is solved.</div>
+    <div class="game-over-podium" id="game-over-podium"></div>
+    <div style="display:flex;gap:10px;justify-content:center;margin-top:28px">
+      <button class="btn-ghost" id="game-over-leave-btn">Main menu</button>
+      <button class="btn-primary" id="game-over-play-again-btn">Return to lobby →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ In-game player context menu ══ -->
+<div class="ctx-menu" id="game-player-ctx-menu">
+  <div class="ctx-menu-item" id="game-ctx-give-host">Give host</div>
+  <div class="ctx-menu-item danger" id="game-ctx-kick">Kick player</div>
+</div>
+
+<!-- ══ Game screen: clues | grid | sidebar ══ -->
+<div class="game-layout" id="game-screen">
+
+  <!-- LEFT: clues panel -->
+  <aside class="game-clues-panel">
+    <div class="game-clues-cols">
+      <div class="game-clues-col">
+        <div class="game-clues-heading">Across</div>
+        <div class="game-clue-list" id="clue-across"></div>
+      </div>
+      <div class="game-clues-divider"></div>
+      <div class="game-clues-col">
+        <div class="game-clues-heading">Down</div>
+        <div class="game-clue-list" id="clue-down"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- CENTER: grid -->
+  <main class="game-grid-wrap">
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                width:100%;max-width:680px;margin-bottom:4px;margin-top:20px">
+      <div class="game-map-label" id="game-map-label">Classic · 15×15</div>
+      <div class="game-timer" id="game-timer">0:00</div>
+    </div>
+
+    <!-- Hint + grid card -->
+    <div id="grid-card-group"
+         style="width:100%;max-width:680px;margin-top:24px;background:transparent;
+                border-top:0.5px solid var(--border);border-bottom:none;
+                padding:12px 0 0;box-sizing:border-box;
+                display:flex;flex-direction:column;align-items:center;gap:10px">
+      <div id="game-active-clue-inner" class="game-active-clue"
+           style="margin-bottom:0;width:100%;max-width:none;padding:0 14px">
+        Select a cell to begin
+      </div>
+      <div class="game-grid-container" style="width:100%;position:relative;display:flex;justify-content:center;padding:0">
+        <input id="game-hidden-input" type="text" autocomplete="off" autocorrect="off"
+               autocapitalize="characters" spellcheck="false" aria-hidden="true" tabindex="-1" />
+        <div class="game-grid" id="game-grid"></div>
+      </div>
+    </div>
+
+    <!-- Non-host mode indicator -->
+    <div id="nonhost-mode-indicator"
+         style="display:none;width:100%;max-width:680px;margin-top:10px;
+                padding:10px 16px;border-radius:10px;font-size:13px;font-weight:500;
+                background:var(--bg3);border:0.5px solid var(--border);color:var(--text3)">
+    </div>
+
+    <!-- Host toolbar (collapsed by default) -->
+    <div id="game-host-toolbar"
+         style="display:none;flex-direction:column;gap:0;width:100%;max-width:680px;
+                margin-top:12px;background:var(--bg3);border:0.5px solid var(--border);
+                border-radius:10px;overflow:visible">
+      <div id="host-toolbar-header"
+           style="padding:10px 14px;border-bottom:0.5px solid var(--border);font-size:11px;
+                  font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text2);
+                  display:flex;align-items:center;justify-content:space-between;cursor:pointer;
+                  user-select:none;transition:background .15s;border-radius:10px 10px 0 0">
+        <div style="display:flex;align-items:center;gap:7px">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Host Settings
+        </div>
+        <svg id="host-toolbar-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none"
+             stroke="currentColor" stroke-width="2"
+             style="transition:transform .2s;transform:rotate(0deg)">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+      <div id="host-toolbar-body" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;flex-wrap:wrap">
+          <div class="host-toolbar-group" id="host-check-group">
+            <span class="host-toolbar-label">Check</span>
+            <button class="host-tool-btn" id="host-check-letter-btn">Letter</button>
+            <button class="host-tool-btn" id="host-check-word-btn">Word</button>
+            <button class="host-tool-btn" id="host-check-grid-btn">Grid</button>
+          </div>
+          <div class="host-toolbar-divider"></div>
+          <div class="host-toolbar-group">
+            <span class="host-toolbar-label">Reveal</span>
+            <button class="host-tool-btn host-tool-btn--reveal" id="host-reveal-letter-btn">Letter</button>
+            <button class="host-tool-btn host-tool-btn--reveal" id="host-reveal-word-btn">Word</button>
+            <button class="host-tool-btn host-tool-btn--reveal" id="host-reveal-grid-btn">Grid</button>
+          </div>
+          <div class="host-toolbar-divider"></div>
+          <button class="autocheck-pill" id="autocheck-pill">
+            <span class="pill-dot"></span>
+            <span class="pill-label">Autocheck</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat-guess mode toggle -->
+    <div style="display:flex;gap:6px;align-items:stretch;width:100%;max-width:680px;margin-top:10px" id="chat-guess-row">
+      <button class="chat-guess-btn" id="chat-guess-btn" disabled>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        Chat Guess Mode
+      </button>
+      <button class="chat-guess-hard-btn" id="chat-guess-hard-btn" style="display:none">HARD</button>
+    </div>
+    <div id="chat-guess-banner" style="display:none" class="chat-guess-banner"></div>
+
+  </main>
+
+  <!-- RIGHT: sidebar -->
+  <aside class="game-sidebar">
+
+    <!-- Top bar: leave + players -->
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:8px 0 10px;flex-shrink:0">
+      <button class="btn-ghost" id="back-to-lobby-btn" style="padding:6px 10px;font-size:12px">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        Lobby
+      </button>
+      <div class="game-players-strip" id="game-players-strip"></div>
+      <button class="btn-ghost" id="game-quit-btn"
+              style="padding:6px 10px;font-size:12px;color:var(--color-wrong);border-color:transparent">
+        Quit
+      </button>
+    </div>
+
+    <!-- Scores -->
+    <div class="game-sidebar-section">
+      <div class="game-sidebar-label">Scores</div>
+      <div class="game-score-list" id="game-score-list"></div>
+    </div>
+
+    <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <!-- Game chat -->
+      <div class="game-sidebar-label">Chat</div>
+      <div class="game-chat-list" id="game-chat-list"></div>
+      <input class="game-chat-input" id="game-chat-input" type="text"
+             maxlength="200" placeholder="Say something…" />
+    </div>
+
+  </aside>
+</div>
+
+<!-- Firebase must initialise before the page controller -->
+<script type="module" src="/js/firebase.js"></script>
+<script type="module" src="/js/controllers/game.controller.js"></script>
+</body>
+</html>

@@ -3,7 +3,7 @@
  * by all page controllers.
  */
 
-import { PLAYER_COLORS } from '../state.js';
+import { PLAYER_COLORS } from '/js/state.js';
 
 // ── Toast ──────────────────────────────────────────
 

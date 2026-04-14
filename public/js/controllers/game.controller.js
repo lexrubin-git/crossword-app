@@ -31,14 +31,7 @@ import {
   openCtxMenu,
 } from '/js/ui.helpers.js';
 
-import {
-  submitCell,
-  checkGrid,
-  revealGrid,
-  sendChatMessage,
-  updatePlayerProfile,
-  forfeitGame,
-} from '../api.service.js';
+// API calls go directly to Firebase Realtime Database
 
 // ── Session ────────────────────────────────────────
 session.lobbyCode = sessionStorage.getItem('lobbyCode') || '';

@@ -32,17 +32,7 @@ import {
   debounce,
 } from '/js/ui.helpers.js';
 
-import {
-  getLobby,
-  leaveLobby,
-  setGameMode,
-  castVote,
-  removeVote,
-  kickPlayer,
-  transferHost,
-  startGame,
-  sendChatMessage,
-} from '../api.service.js';
+// API calls go directly to Firebase Realtime Database
 
 // ── Bootstrap session from sessionStorage ─────────
 session.lobbyCode = sessionStorage.getItem('lobbyCode') || '';

@@ -13,7 +13,7 @@ import {
   savePlayerIdentity,
   navigate,
   PLAYER_COLORS,
-} from '../state.js';
+} from '/js/state.js';
 
 import {
   showToast,
@@ -21,9 +21,9 @@ import {
   closeOverlay,
   renderSwatches,
   applyAvatar,
-} from '../ui.helpers.js';
+} from '/js/ui.helpers.js';
 
-import { createLobby, getLobby, joinLobby } from '../api.service.js';
+// Firebase is used directly — no Express server needed on Firebase Hosting
 
 // ── State ──────────────────────────────────────────
 let identity = loadPlayerIdentity();
@@ -114,20 +114,65 @@ function confirmProfile() {
   refreshIdentityRow();
 }
 
+// ── Firebase helpers ───────────────────────────────
+function waitForFirebase() {
+  return new Promise((resolve) => {
+    if (window._fb) return resolve(window._fb);
+    window.addEventListener('firebase-ready', () => resolve(window._fb), { once: true });
+  });
+}
+
+function generateCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  return Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+function generatePlayerId() {
+  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
 // ── Create lobby ───────────────────────────────────
 async function handleCreateLobby() {
   identity = loadPlayerIdentity();
   if (!identity.name) {
     openProfileOverlay();
-    // After saving, a second click will proceed
     return;
   }
   createLobbyBtn.disabled = true;
   createLobbyBtn.textContent = 'Creating…';
   try {
-    const { code } = await createLobby(identity.name, identity.color);
+    const { db, ref, set } = await waitForFirebase();
+    const code     = generateCode();
+    const playerId = generatePlayerId();
+
+    await set(ref(db, `lobbies/${code}`), {
+      code,
+      hostId:   playerId,
+      status:   'waiting',
+      mode:     'together',
+      createdAt: Date.now(),
+      players: {
+        [playerId]: {
+          name:     identity.name,
+          color:    identity.color,
+          avatar:   identity.avatar || '',
+          isHost:   true,
+          inGame:   false,
+          joinedAt: Date.now(),
+        },
+      },
+      votes: {},
+      gameSettings: {
+        puzzleId:         null,
+        startedAt:        null,
+        gameEnded:        false,
+        autocheckEnabled: false,
+      },
+    });
+
     sessionStorage.setItem('lobbyCode', code);
-    sessionStorage.setItem('isHost', '1');
+    sessionStorage.setItem('playerId',  playerId);
+    sessionStorage.setItem('isHost',    '1');
     navigate('lobby');
   } catch (err) {
     showToast('Could not create lobby. Try again.');
@@ -165,9 +210,11 @@ async function handleJoinCodeInput() {
     return;
   }
 
-  // Validate code against server
   try {
-    const lobby = await getLobby(code);
+    const { db, ref, get } = await waitForFirebase();
+    const snap  = await get(ref(db, `lobbies/${code}`));
+    if (!snap.exists()) throw new Error('Not found');
+    const lobby = snap.val();
     const takenColors = Object.values(lobby.players || {}).map((p) => p.color);
     renderSwatches(joinColorSwatches, pendingJoinColor, takenColors, (c) => {
       pendingJoinColor = c;
@@ -185,23 +232,28 @@ async function handleJoinCodeInput() {
 
 async function handleDoJoin() {
   const name = joinNameInput.value.trim();
-  if (!name) {
-    joinNameError.classList.add('visible');
-    return;
-  }
-  if (!pendingJoinCode) {
-    joinError.classList.add('visible');
-    return;
-  }
+  if (!name) { joinNameError.classList.add('visible'); return; }
+  if (!pendingJoinCode) { joinError.classList.add('visible'); return; }
 
   joinBtn.disabled = true;
   joinBtn.textContent = 'Joining…';
   try {
-    const { playerId } = await joinLobby(pendingJoinCode, name, pendingJoinColor);
+    const { db, ref, set } = await waitForFirebase();
+    const playerId = generatePlayerId();
+
+    await set(ref(db, `lobbies/${pendingJoinCode}/players/${playerId}`), {
+      name:     name,
+      color:    pendingJoinColor,
+      avatar:   '',
+      isHost:   false,
+      inGame:   false,
+      joinedAt: Date.now(),
+    });
+
     savePlayerIdentity({ name, color: pendingJoinColor });
     sessionStorage.setItem('lobbyCode', pendingJoinCode);
-    sessionStorage.setItem('playerId', playerId);
-    sessionStorage.setItem('isHost', '0');
+    sessionStorage.setItem('playerId',  playerId);
+    sessionStorage.setItem('isHost',    '0');
     navigate('lobby');
   } catch (err) {
     showToast(err.message || 'Could not join lobby.');

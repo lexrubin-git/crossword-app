@@ -19,7 +19,7 @@ import {
   savePlayerIdentity,
   session,
   navigate,
-} from '../state.js';
+} from '/js/state.js';
 
 import {
   showToast,
@@ -30,7 +30,7 @@ import {
   startWaitingDots,
   openCtxMenu,
   debounce,
-} from '../ui.helpers.js';
+} from '/js/ui.helpers.js';
 
 import {
   getLobby,

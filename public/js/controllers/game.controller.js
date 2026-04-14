@@ -19,7 +19,7 @@ import {
   loadPlayerIdentity,
   session,
   navigate,
-} from '../state.js';
+} from '/js/state.js';
 
 import {
   showToast,
@@ -29,7 +29,7 @@ import {
   applyAvatar,
   formatTime,
   openCtxMenu,
-} from '../ui.helpers.js';
+} from '/js/ui.helpers.js';
 
 import {
   submitCell,

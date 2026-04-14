@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crossword — Home</title>
+  <title>Crossword With Friends</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/main.css" />
 </head>
@@ -16,25 +16,19 @@
   <div class="overlay-card">
     <div class="overlay-title">Join a lobby</div>
     <p class="overlay-sub2">Enter the code and pick your name and color.</p>
-
     <label class="field-label" for="join-code">Lobby code</label>
     <input class="code-input" id="join-code" type="text" maxlength="4" placeholder="XXXX" />
     <div class="field-error" id="join-error">Please enter a valid lobby code.</div>
-
     <div style="margin-top:20px">
       <label class="field-label" for="join-name">Your name</label>
       <input class="name-input" id="join-name" type="text" maxlength="20" placeholder="Wordsmith42" />
       <div class="field-error" id="join-name-error">Please enter your name.</div>
     </div>
-
     <div style="margin-top:18px;margin-bottom:24px">
       <label class="field-label">Your color</label>
-      <div id="join-color-locked" style="font-size:12px;color:#bbb;margin-bottom:6px">
-        Enter a valid code above to pick your color
-      </div>
+      <div id="join-color-locked" style="font-size:12px;color:#bbb;margin-bottom:6px">Enter a valid code above to pick your color</div>
       <div class="color-swatches" id="join-color-swatches" style="opacity:0.35;pointer-events:none"></div>
     </div>
-
     <div class="overlay-row">
       <button class="btn-ghost" id="join-cancel-btn">Cancel</button>
       <button class="btn-primary" id="join-btn">Join →</button>
@@ -43,88 +37,60 @@
 </div>
 
 <!-- ══ Profile overlay ══ -->
-<div class="overlay-backdrop hidden pixel-art-open" id="profile-overlay">
-  <div class="overlay-card" style="max-width:660px;padding:32px 56px 28px 32px">
-    <div style="display:flex;gap:20px;align-items:flex-start;margin-bottom:24px">
-      <div style="flex:1;display:flex;flex-direction:column;gap:14px">
-        <div>
-          <label class="field-label" for="player-name">Your name</label>
-          <input class="name-input" id="player-name" type="text" maxlength="20" placeholder="Wordsmith42" />
-          <div class="field-error" id="name-error">Please enter a name to continue.</div>
-        </div>
-        <div>
-          <label class="field-label">Your color</label>
-          <div class="color-swatches" id="color-swatches"></div>
-        </div>
-      </div>
-      <!-- Avatar preview -->
-      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0">
-        <div id="profile-avatar-preview"
-             style="width:80px;height:80px;border-radius:50%;overflow:hidden;
-                    border:5px solid var(--border2);background:#fff;flex-shrink:0;
-                    position:relative;box-sizing:content-box">
-          <canvas id="avatar-preview-canvas" width="80" height="80"
-                  style="width:80px;height:80px;display:block;border-radius:50%"></canvas>
-        </div>
-        <span style="font-size:10px;color:var(--text3);letter-spacing:.06em;text-transform:uppercase">Preview</span>
-      </div>
+<div class="overlay-backdrop hidden" id="profile-overlay">
+  <div class="overlay-card" style="max-width:400px">
+    <div class="overlay-title">Your profile</div>
+    <div style="margin-bottom:16px">
+      <label class="field-label" for="player-name">Your name</label>
+      <input class="name-input" id="player-name" type="text" maxlength="20" placeholder="Wordsmith42" />
+      <div class="field-error" id="name-error">Please enter a name to continue.</div>
     </div>
-
-    <div style="border-top:0.5px solid var(--border);margin-bottom:18px"></div>
-    <div class="section-label" style="margin-bottom:12px">Draw your avatar</div>
-    <div id="profile-canvas-slot"></div>
-
-    <div class="overlay-footer" style="margin-top:8px">
+    <div style="margin-bottom:24px">
+      <label class="field-label">Your color</label>
+      <div class="color-swatches" id="color-swatches"></div>
+    </div>
+    <div id="profile-avatar-preview" style="display:none"></div>
+    <div class="overlay-row">
       <button class="btn-ghost" id="profile-cancel-btn">Cancel</button>
       <button class="btn-primary" id="profile-confirm-btn">Save →</button>
     </div>
   </div>
 </div>
 
-<!-- ══ Shared pixel-draw block (moved into whichever overlay is open) ══ -->
-<div id="pixel-cursor"></div>
-<div id="pixel-draw-block" style="display:none">
-  <!-- Pixel art toolbar injected by pixel-art.controller.js -->
-</div>
-
 <!-- ══ Home screen ══ -->
-<main class="page" id="home-screen"
-      style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-             min-height:100vh;text-align:center;padding-top:0;padding-bottom:0;">
+<main style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+             min-height:100vh;text-align:center;padding:0 24px;">
 
-  <!-- Logo SVG -->
-  <div style="margin-bottom:48px" id="logo-wrap">
-    <!-- Logo injected by home.controller.js to keep HTML clean -->
-  </div>
+  <!-- Logo -->
+  <div style="margin-bottom:48px" id="logo-wrap"></div>
 
-  <!-- Action cards -->
-  <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:420px;
-              padding:0 8px;align-items:center" id="home-actions">
-
+  <!-- Buttons -->
+  <div style="display:flex;flex-direction:column;gap:14px;width:100%;max-width:380px;align-items:center">
     <button class="btn-primary" id="create-lobby-btn"
             style="width:100%;padding:14px 24px;font-size:15px;border-radius:10px">
       Create a lobby
     </button>
-
     <button class="btn-ghost" id="join-lobby-btn"
             style="width:100%;padding:14px 24px;font-size:15px;border-radius:10px;justify-content:center">
       Join a lobby
     </button>
-
   </div>
 
-  <!-- Player identity row (shown once name is set) -->
-  <div id="home-identity-row"
-       style="display:none;margin-top:36px;align-items:center;gap:10px;font-size:13px;color:var(--text2)">
-    <div id="home-avatar" style="width:28px;height:28px;border-radius:50%;background-size:cover;background-position:center;flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff"></div>
-    <span id="home-player-name" style="cursor:pointer"></span>
-    <button class="btn-ghost" id="edit-profile-btn"
-            style="padding:5px 10px;font-size:12px">Edit profile</button>
+  <!-- Identity chip -->
+  <div style="display:flex;align-items:center;gap:10px;margin-top:36px;font-size:13px;color:var(--text2)">
+    <div id="chip-avatar"
+         style="width:28px;height:28px;border-radius:50%;flex-shrink:0;cursor:pointer;
+                display:flex;align-items:center;justify-content:center;
+                font-size:11px;font-weight:700;color:#fff;
+                background-size:cover;background-position:center"></div>
+    <span id="chip-name" style="cursor:pointer"></span>
+    <button class="btn-ghost" id="edit-profile-btn" style="padding:5px 10px;font-size:12px">
+      Edit profile
+    </button>
   </div>
 
 </main>
 
-<!-- Firebase must initialise before the page controller -->
 <script type="module" src="/js/firebase.js"></script>
 <script type="module" src="/js/controllers/home.controller.js"></script>
 </body>

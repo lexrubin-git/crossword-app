@@ -1,120 +1,10 @@
 /**
- * home.controller.js — Controls the Home (index) page.
- *
- * Responsibilities:
- *  - Render the animated logo
- *  - Show / hide the player identity row
- *  - Handle "Create lobby" and "Join lobby" actions
- *  - Open the profile overlay for first-time setup or editing
+ * home.controller.js — Home page controller.
+ * Uses Firebase Realtime Database directly, mirroring
+ * the original single-file implementation exactly.
  */
 
-import {
-  loadPlayerIdentity,
-  savePlayerIdentity,
-  navigate,
-  PLAYER_COLORS,
-} from '/js/state.js';
-
-import {
-  showToast,
-  openOverlay,
-  closeOverlay,
-  renderSwatches,
-  applyAvatar,
-} from '/js/ui.helpers.js';
-
-// Firebase is used directly — no Express server needed on Firebase Hosting
-
-// ── State ──────────────────────────────────────────
-let identity = loadPlayerIdentity();
-let pendingJoinCode = '';
-let pendingJoinColor = identity.color;
-
-// ── DOM refs ───────────────────────────────────────
-const homeIdentityRow  = document.getElementById('home-identity-row');
-const homeAvatar       = document.getElementById('home-avatar');
-const homePlayerName   = document.getElementById('home-player-name');
-const createLobbyBtn   = document.getElementById('create-lobby-btn');
-const joinLobbyBtn     = document.getElementById('join-lobby-btn');
-const editProfileBtn   = document.getElementById('edit-profile-btn');
-
-// Profile overlay
-const profileOverlay   = document.getElementById('profile-overlay');
-const playerNameInput  = document.getElementById('player-name');
-const nameError        = document.getElementById('name-error');
-const profileConfirmBtn= document.getElementById('profile-confirm-btn');
-const profileCancelBtn = document.getElementById('profile-cancel-btn');
-
-// Join overlay
-const joinOverlay      = document.getElementById('join-overlay');
-const joinCodeInput    = document.getElementById('join-code');
-const joinError        = document.getElementById('join-error');
-const joinNameInput    = document.getElementById('join-name');
-const joinNameError    = document.getElementById('join-name-error');
-const joinColorSwatches= document.getElementById('join-color-swatches');
-const joinBtn          = document.getElementById('join-btn');
-const joinCancelBtn    = document.getElementById('join-cancel-btn');
-
-// ── Logo ───────────────────────────────────────────
-function renderLogo() {
-  const wrap = document.getElementById('logo-wrap');
-  if (!wrap) return;
-  // The original inline SVG logo — referenced here so HTML stays clean.
-  wrap.innerHTML = `
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1554 622.21"
-       style="width:clamp(360px,85vw,820px);height:auto;display:block;margin:0 auto;
-              animation:logoPulse 4s ease-in-out infinite;transform-origin:center center">
-    <style>
-      .st0{stroke:#f9f8ef;stroke-miterlimit:10;stroke-width:12px}
-      .st1{fill:#f2f2f2;stroke:#000;stroke-linecap:round;stroke-linejoin:round;stroke-width:5px}
-    </style>
-    <path class="st0" d="M1371.46,105.6H182.53c-7.95,0-14.42,6.47-14.42,14.42v122.83c0,.31.06.6.17.88-.1.27-.17.57-.17.88v257.58c0,7.95,6.47,14.42,14.42,14.42h919.43c7.95,0,14.42-6.47,14.42-14.42v-110.91c0-7.95-6.47-14.42-14.42-14.42h-389.84v-131.51h659.34c7.95,0,14.42-6.47,14.42-14.42v-110.91c0-7.95-6.47-14.42-14.42-14.42Z"/>
-    <g>
-      <path class="st1" d="M182.53,108.1h122.83v134.75h-134.75v-122.83c0-6.58,5.34-11.92,11.92-11.92Z"/>
-      <rect class="st1" x="305.36" y="108.1" width="134.75" height="134.75"/>
-      <rect class="st1" x="1113.88" y="108.1" width="134.75" height="134.75"/>
-      <rect class="st1" x="305.36" y="379.36" width="134.75" height="134.75"/>
-      <rect class="st1" x="440.12" y="108.1" width="134.75" height="134.75"/>
-      <rect class="st1" x="979.13" y="108.1" width="134.75" height="134.75"/>
-    </g>
-  </svg>`;
-}
-
-// ── Identity row ───────────────────────────────────
-function refreshIdentityRow() {
-  identity = loadPlayerIdentity();
-  if (!identity.name) {
-    homeIdentityRow.style.display = 'none';
-    return;
-  }
-  homeIdentityRow.style.display = 'flex';
-  applyAvatar(homeAvatar, identity);
-  homePlayerName.textContent = identity.name;
-}
-
-// ── Profile overlay ────────────────────────────────
-function openProfileOverlay() {
-  identity = loadPlayerIdentity();
-  playerNameInput.value = identity.name;
-  nameError.classList.remove('visible');
-  renderSwatches('color-swatches', identity.color, [], (c) => {
-    identity.color = c;
-  });
-  openOverlay('profile-overlay');
-}
-
-function confirmProfile() {
-  const name = playerNameInput.value.trim();
-  if (!name) {
-    nameError.classList.add('visible');
-    return;
-  }
-  savePlayerIdentity({ name, color: identity.color });
-  closeOverlay('profile-overlay');
-  refreshIdentityRow();
-}
-
-// ── Firebase helpers ───────────────────────────────
+// ── Wait for Firebase ──────────────────────────────
 function waitForFirebase() {
   return new Promise((resolve) => {
     if (window._fb) return resolve(window._fb);
@@ -122,174 +12,316 @@ function waitForFirebase() {
   });
 }
 
-function generateCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  return Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+// ── Colors (matching original exactly) ────────────
+const COLORS = [
+  { hex:'#E03030',name:'Red'    }, { hex:'#E07830',name:'Orange' },
+  { hex:'#E0C030',name:'Yellow' }, { hex:'#38A838',name:'Green'  },
+  { hex:'#3080D8',name:'Blue'   }, { hex:'#7040D0',name:'Purple' },
+  { hex:'#D84090',name:'Pink'   }, { hex:'#7A4828',name:'Brown'  },
+  { hex:'#444444',name:'Black'  }, { hex:'#888888',name:'Grey'   },
+];
+
+// ── Random username generator ──────────────────────
+const ADJ  = ['Bold','Swift','Clever','Sharp','Brave','Quiet','Wild','Calm','Witty','Sneaky'];
+const NOUN = ['Panda','Falcon','Walrus','Cactus','Penguin','Noodle','Pickle','Muffin','Rocket','Badger'];
+function genUsername() {
+  return ADJ[Math.floor(Math.random()*ADJ.length)] + NOUN[Math.floor(Math.random()*NOUN.length)] + (Math.floor(Math.random()*900)+100);
 }
 
-function generatePlayerId() {
-  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+let playerName  = genUsername();
+let playerColor = COLORS[Math.floor(Math.random() * COLORS.length)];
+let pixelAvatarData = null;
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2500);
 }
 
-// ── Create lobby ───────────────────────────────────
-async function handleCreateLobby() {
-  identity = loadPlayerIdentity();
-  if (!identity.name) {
-    openProfileOverlay();
-    return;
+function updateChip() {
+  const avatar = document.getElementById('chip-avatar');
+  const nameEl = document.getElementById('chip-name');
+  if (!avatar || !nameEl) return;
+  avatar.style.background = playerColor.hex;
+  if (pixelAvatarData) {
+    avatar.style.backgroundImage = `url(${pixelAvatarData})`;
+    avatar.style.backgroundSize = 'cover';
+    avatar.style.backgroundPosition = 'center';
+    avatar.textContent = '';
+  } else {
+    avatar.style.backgroundImage = '';
+    avatar.textContent = playerName.charAt(0).toUpperCase();
   }
-  createLobbyBtn.disabled = true;
-  createLobbyBtn.textContent = 'Creating…';
-  try {
-    const { db, ref, set } = await waitForFirebase();
-    const code     = generateCode();
-    const playerId = generatePlayerId();
-
-    await set(ref(db, `lobbies/${code}`), {
-      code,
-      hostId:   playerId,
-      status:   'waiting',
-      mode:     'together',
-      createdAt: Date.now(),
-      players: {
-        [playerId]: {
-          name:     identity.name,
-          color:    identity.color,
-          avatar:   identity.avatar || '',
-          isHost:   true,
-          inGame:   false,
-          joinedAt: Date.now(),
-        },
-      },
-      votes: {},
-      gameSettings: {
-        puzzleId:         null,
-        startedAt:        null,
-        gameEnded:        false,
-        autocheckEnabled: false,
-      },
-    });
-
-    sessionStorage.setItem('lobbyCode', code);
-    sessionStorage.setItem('playerId',  playerId);
-    sessionStorage.setItem('isHost',    '1');
-    navigate('lobby');
-  } catch (err) {
-    showToast('Could not create lobby. Try again.');
-    console.error(err);
-  } finally {
-    createLobbyBtn.disabled = false;
-    createLobbyBtn.textContent = 'Create a lobby';
-  }
+  nameEl.textContent = playerName;
 }
 
-// ── Join lobby ─────────────────────────────────────
-function openJoinOverlay() {
-  identity = loadPlayerIdentity();
-  joinCodeInput.value = '';
-  joinNameInput.value = identity.name;
-  joinError.classList.remove('visible');
-  joinNameError.classList.remove('visible');
-  pendingJoinColor = identity.color;
-  joinColorSwatches.style.opacity = '0.35';
-  joinColorSwatches.style.pointerEvents = 'none';
-  renderSwatches(joinColorSwatches, pendingJoinColor, [], (c) => {
-    pendingJoinColor = c;
+function initColorSwatches() {
+  const container = document.getElementById('color-swatches');
+  if (!container) return;
+  container.innerHTML = '';
+  COLORS.forEach((c) => {
+    const s = document.createElement('div');
+    s.className = 'swatch' + (c.hex === playerColor.hex ? ' selected' : '');
+    s.style.background = c.hex;
+    s.title = c.name;
+    s.dataset.hex = c.hex;
+    s.onclick = () => {
+      container.querySelectorAll('.swatch').forEach(el => el.classList.remove('selected'));
+      s.classList.add('selected');
+      playerColor = c;
+    };
+    container.appendChild(s);
   });
-  openOverlay('join-overlay');
 }
 
-async function handleJoinCodeInput() {
-  const code = joinCodeInput.value.trim().toUpperCase();
-  joinError.classList.remove('visible');
-  joinCodeInput.classList.remove('error');
+function openProfile() {
+  const input = document.getElementById('player-name');
+  if (input) input.value = playerName;
+  initColorSwatches();
+  document.getElementById('profile-overlay')?.classList.remove('hidden');
+}
 
-  if (code.length < 4) {
-    joinColorSwatches.style.opacity = '0.35';
-    joinColorSwatches.style.pointerEvents = 'none';
+function confirmProfile() {
+  const val = document.getElementById('player-name')?.value.trim();
+  if (!val) {
+    document.getElementById('player-name')?.classList.add('error');
+    document.getElementById('name-error')?.classList.add('visible');
     return;
   }
+  playerName = val;
+  const sel = document.querySelector('#color-swatches .swatch.selected');
+  if (sel) playerColor = COLORS.find(c => c.hex === sel.dataset.hex) || playerColor;
+  closeOverlay('profile-overlay');
+  updateChip();
+  sessionStorage.setItem('playerName',      playerName);
+  sessionStorage.setItem('playerColorHex',  playerColor.hex);
+  sessionStorage.setItem('playerColorName', playerColor.name);
+}
 
+function closeOverlay(id) {
+  document.getElementById(id)?.classList.add('hidden');
+}
+
+function initJoinSwatches(takenHexes) {
+  const taken = takenHexes || new Set();
+  const firstFree = COLORS.find(c => !taken.has(c.hex)) || COLORS[0];
+  const container = document.getElementById('join-color-swatches');
+  const lockMsg   = document.getElementById('join-color-locked');
+  if (!container) return;
+  container.innerHTML = '';
+  COLORS.forEach(c => {
+    const isTaken = taken.has(c.hex);
+    const s = document.createElement('div');
+    s.className = 'swatch' + (!isTaken && c.hex === firstFree.hex ? ' selected' : '') + (isTaken ? ' taken' : '');
+    s.style.background = c.hex;
+    s.title = isTaken ? c.name + ' (taken)' : c.name;
+    s.dataset.hex = c.hex;
+    if (!isTaken) {
+      s.onclick = () => {
+        container.querySelectorAll('.swatch').forEach(el => el.classList.remove('selected'));
+        s.classList.add('selected');
+      };
+    }
+    container.appendChild(s);
+  });
+  container.style.opacity = '1';
+  container.style.pointerEvents = '';
+  if (lockMsg) lockMsg.style.display = 'none';
+}
+
+async function goToLobby() {
+  const btn = document.getElementById('create-lobby-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  try {
+    const { db, ref, set, push, onDisconnect, serverTimestamp } = await waitForFirebase();
+    const SAFE = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    while (code.length < 4) code += SAFE[Math.floor(Math.random() * SAFE.length)];
+
+    const newRef = push(ref(db, 'lobbies/' + code + '/players'));
+    const myPlayerId = newRef.key;
+
+    await set(ref(db, 'lobbies/' + code), {
+      host: myPlayerId, createdAt: serverTimestamp(), status: 'waiting',
+      players: {
+        [myPlayerId]: {
+          name: playerName, colorHex: playerColor.hex,
+          avatar: pixelAvatarData || null, vote: null, voteMeta: null,
+          isHost: true, joinedAt: serverTimestamp(),
+        }
+      }
+    });
+    onDisconnect(ref(db, 'lobbies/' + code + '/players/' + myPlayerId)).remove();
+
+    sessionStorage.setItem('lobbyCode',       code);
+    sessionStorage.setItem('playerId',        myPlayerId);
+    sessionStorage.setItem('isHost',          '1');
+    sessionStorage.setItem('playerName',      playerName);
+    sessionStorage.setItem('playerColorHex',  playerColor.hex);
+    sessionStorage.setItem('playerColorName', playerColor.name);
+    if (pixelAvatarData) sessionStorage.setItem('playerAvatar', pixelAvatarData);
+
+    window.location.href = '/pages/lobby.html';
+  } catch(e) {
+    showToast('Could not create lobby. Try again.');
+    console.error(e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Create a lobby'; }
+  }
+}
+
+function openJoinOverlay() {
+  const codeInput = document.getElementById('join-code');
+  const nameInput = document.getElementById('join-name');
+  if (codeInput) codeInput.value = '';
+  if (nameInput) nameInput.value = playerName;
+  ['join-code','join-name'].forEach(id => document.getElementById(id)?.classList.remove('error'));
+  ['join-error','join-name-error'].forEach(id => document.getElementById(id)?.classList.remove('visible'));
+  const container = document.getElementById('join-color-swatches');
+  const lockMsg   = document.getElementById('join-color-locked');
+  if (container) {
+    container.innerHTML = '';
+    COLORS.forEach(c => {
+      const s = document.createElement('div');
+      s.className = 'swatch taken';
+      s.style.background = c.hex;
+      container.appendChild(s);
+    });
+    container.style.opacity = '0.35';
+    container.style.pointerEvents = 'none';
+  }
+  if (lockMsg) lockMsg.style.display = '';
+  document.getElementById('join-overlay')?.classList.remove('hidden');
+  setTimeout(() => codeInput?.focus(), 50);
+}
+
+let joinCodeDebounce = null;
+function onJoinInput() {
+  document.getElementById('join-code')?.classList.remove('error');
+  document.getElementById('join-error')?.classList.remove('visible');
+  const sw = document.getElementById('join-color-swatches');
+  const lk = document.getElementById('join-color-locked');
+  if (sw) { sw.style.opacity = '0.35'; sw.style.pointerEvents = 'none'; }
+  if (lk) lk.style.display = '';
+  clearTimeout(joinCodeDebounce);
+  const code = document.getElementById('join-code')?.value.trim().toUpperCase();
+  if (!code || code.length < 4) return;
+  joinCodeDebounce = setTimeout(() => fetchLobbyColors(code), 500);
+}
+
+async function fetchLobbyColors(code) {
   try {
     const { db, ref, get } = await waitForFirebase();
-    const snap  = await get(ref(db, `lobbies/${code}`));
-    if (!snap.exists()) throw new Error('Not found');
-    const lobby = snap.val();
-    const takenColors = Object.values(lobby.players || {}).map((p) => p.color);
-    renderSwatches(joinColorSwatches, pendingJoinColor, takenColors, (c) => {
-      pendingJoinColor = c;
-    });
-    joinColorSwatches.style.opacity = '1';
-    joinColorSwatches.style.pointerEvents = 'auto';
-    pendingJoinCode = code;
-  } catch {
-    joinError.classList.add('visible');
-    joinCodeInput.classList.add('error');
-    joinColorSwatches.style.opacity = '0.35';
-    joinColorSwatches.style.pointerEvents = 'none';
-  }
+    const snap = await get(ref(db, 'lobbies/' + code + '/players'));
+    if (!snap.exists()) return;
+    const takenHexes = new Set(Object.values(snap.val() || {}).map(p => p.colorHex));
+    initJoinSwatches(takenHexes);
+  } catch(e) {}
 }
 
-async function handleDoJoin() {
-  const name = joinNameInput.value.trim();
-  if (!name) { joinNameError.classList.add('visible'); return; }
-  if (!pendingJoinCode) { joinError.classList.add('visible'); return; }
+async function doJoin() {
+  const code = document.getElementById('join-code')?.value.trim().toUpperCase();
+  const name = document.getElementById('join-name')?.value.trim();
+  let ok = true;
+  if (!code) {
+    document.getElementById('join-code')?.classList.add('error');
+    const e = document.getElementById('join-error');
+    if (e) { e.textContent = 'Please enter a lobby code.'; e.classList.add('visible'); }
+    ok = false;
+  }
+  if (!name) {
+    document.getElementById('join-name')?.classList.add('error');
+    document.getElementById('join-name-error')?.classList.add('visible');
+    ok = false;
+  }
+  if (!ok) return;
 
-  joinBtn.disabled = true;
-  joinBtn.textContent = 'Joining…';
+  const btn = document.getElementById('join-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+
   try {
-    const { db, ref, set } = await waitForFirebase();
-    const playerId = generatePlayerId();
+    const { db, ref, get, set, push, onDisconnect, serverTimestamp } = await waitForFirebase();
+    const snap = await get(ref(db, 'lobbies/' + code));
+    if (!snap.exists()) {
+      const e = document.getElementById('join-error');
+      if (e) { e.textContent = 'Lobby not found.'; e.classList.add('visible'); }
+      document.getElementById('join-code')?.classList.add('error');
+      return;
+    }
+    const selSwatch = document.querySelector('#join-color-swatches .swatch.selected');
+    const chosenHex = selSwatch?.dataset.hex || playerColor.hex;
+    const chosenColor = COLORS.find(c => c.hex === chosenHex) || playerColor;
 
-    await set(ref(db, `lobbies/${pendingJoinCode}/players/${playerId}`), {
-      name:     name,
-      color:    pendingJoinColor,
-      avatar:   '',
-      isHost:   false,
-      inGame:   false,
-      joinedAt: Date.now(),
+    const newRef = push(ref(db, 'lobbies/' + code + '/players'));
+    const myPlayerId = newRef.key;
+    await set(newRef, {
+      name: name, colorHex: chosenHex, avatar: pixelAvatarData || null,
+      vote: null, isHost: false, joinedAt: serverTimestamp(),
     });
+    onDisconnect(ref(db, 'lobbies/' + code + '/players/' + myPlayerId)).remove();
 
-    savePlayerIdentity({ name, color: pendingJoinColor });
-    sessionStorage.setItem('lobbyCode', pendingJoinCode);
-    sessionStorage.setItem('playerId',  playerId);
-    sessionStorage.setItem('isHost',    '0');
-    navigate('lobby');
-  } catch (err) {
-    showToast(err.message || 'Could not join lobby.');
-    console.error(err);
+    playerName = name; playerColor = chosenColor;
+    sessionStorage.setItem('lobbyCode',       code);
+    sessionStorage.setItem('playerId',        myPlayerId);
+    sessionStorage.setItem('isHost',          '0');
+    sessionStorage.setItem('playerName',      playerName);
+    sessionStorage.setItem('playerColorHex',  playerColor.hex);
+    sessionStorage.setItem('playerColorName', playerColor.name);
+    if (pixelAvatarData) sessionStorage.setItem('playerAvatar', pixelAvatarData);
+
+    window.location.href = '/pages/lobby.html';
+  } catch(e) {
+    const err = document.getElementById('join-error');
+    if (err) { err.textContent = 'Connection error. Try again.'; err.classList.add('visible'); }
+    console.error(e);
   } finally {
-    joinBtn.disabled = false;
-    joinBtn.textContent = 'Join →';
+    if (btn) { btn.disabled = false; btn.textContent = 'Join →'; }
   }
 }
 
-// ── Event listeners ────────────────────────────────
-createLobbyBtn.addEventListener('click', handleCreateLobby);
-joinLobbyBtn.addEventListener('click', openJoinOverlay);
-editProfileBtn?.addEventListener('click', openProfileOverlay);
-homeAvatar?.addEventListener('click', openProfileOverlay);
-homePlayerName?.addEventListener('click', openProfileOverlay);
-
-profileConfirmBtn.addEventListener('click', confirmProfile);
-profileCancelBtn.addEventListener('click', () => closeOverlay('profile-overlay'));
-playerNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmProfile(); });
-playerNameInput.addEventListener('input',   () => nameError.classList.remove('visible'));
-
-joinCancelBtn.addEventListener('click', () => closeOverlay('join-overlay'));
-joinCodeInput.addEventListener('input', handleJoinCodeInput);
-joinCodeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleDoJoin(); });
-joinNameInput.addEventListener('input',   () => joinNameError.classList.remove('visible'));
-joinBtn.addEventListener('click', handleDoJoin);
+// ── Event wiring ───────────────────────────────────
+document.getElementById('create-lobby-btn')?.addEventListener('click', goToLobby);
+document.getElementById('join-lobby-btn')?.addEventListener('click', openJoinOverlay);
+document.getElementById('edit-profile-btn')?.addEventListener('click', openProfile);
+document.getElementById('chip-avatar')?.addEventListener('click', openProfile);
+document.getElementById('chip-name')?.addEventListener('click', openProfile);
+document.getElementById('profile-confirm-btn')?.addEventListener('click', confirmProfile);
+document.getElementById('profile-cancel-btn')?.addEventListener('click', () => closeOverlay('profile-overlay'));
+document.getElementById('player-name')?.addEventListener('keydown', e => { if (e.key === 'Enter') confirmProfile(); });
+document.getElementById('player-name')?.addEventListener('input', () => {
+  document.getElementById('player-name')?.classList.remove('error');
+  document.getElementById('name-error')?.classList.remove('visible');
+});
+document.getElementById('join-cancel-btn')?.addEventListener('click', () => closeOverlay('join-overlay'));
+document.getElementById('join-code')?.addEventListener('input', onJoinInput);
+document.getElementById('join-code')?.addEventListener('keydown', e => { if (e.key === 'Enter') doJoin(); });
+document.getElementById('join-name')?.addEventListener('input', () => {
+  document.getElementById('join-name')?.classList.remove('error');
+  document.getElementById('join-name-error')?.classList.remove('visible');
+});
+document.getElementById('join-btn')?.addEventListener('click', doJoin);
 
 // ── Bootstrap ──────────────────────────────────────
-renderLogo();
-refreshIdentityRow();
+const storedName  = sessionStorage.getItem('playerName');
+const storedColor = sessionStorage.getItem('playerColorHex');
+if (storedName)  playerName  = storedName;
+if (storedColor) playerColor = COLORS.find(c => c.hex === storedColor) || playerColor;
 
-// If there's a ?join=CODE query param, open join overlay pre-filled
-const urlCode = new URLSearchParams(location.search).get('join');
-if (urlCode) {
-  openJoinOverlay();
-  joinCodeInput.value = urlCode.toUpperCase();
-  handleJoinCodeInput();
-}
+// Load SVG logo
+fetch('/img/crosswordwithfriends.svg')
+  .then(r => r.text())
+  .then(svg => {
+    const wrap = document.getElementById('logo-wrap');
+    if (!wrap) return;
+    wrap.innerHTML = svg;
+    const svgEl = wrap.querySelector('svg');
+    if (svgEl) svgEl.style.cssText = 'width:clamp(280px,80vw,720px);height:auto;display:block;margin:0 auto;animation:logoPulse 4s ease-in-out infinite;transform-origin:center center';
+  })
+  .catch(() => {
+    const wrap = document.getElementById('logo-wrap');
+    if (wrap) wrap.innerHTML = '<div style="font-size:48px;font-weight:700;color:var(--text)">Crossword</div>';
+  });
+
+updateChip();

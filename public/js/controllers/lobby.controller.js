@@ -531,7 +531,9 @@ function renderStartBtn() {
       ${inGamePlayers.length > 0 ? `<span style="font-size:12px;color:#e05151;">Waiting for ${inGamePlayers.length} player${inGamePlayers.length>1?'s':''} to return<span id="return-dots"></span></span>` : ''}
     </div>`;
 
-  document.getElementById('start-game-btn')?.addEventListener('click', modeSelected && !startDisabled ? startGame : null);
+  document.getElementById('start-game-btn')?.addEventListener('click', () => {
+    if (modeSelected && !startDisabled) startGame();
+  });
   if (inGamePlayers.length > 0) startDots('return-dots', 'returnDots');
 }
 
@@ -682,7 +684,8 @@ function subscribeLobbyFB() {
     // Game started — redirect to game.html
     if (data.status === 'started' && data.puzzleDateKey) {
       const gameIsEnded = data.gameSettings?.gameEnded === true;
-      if (!gameIsEnded && !state.isHost) {
+      const anyoneInGame = Object.values(players).some(p => p?.inGame);
+      if (!gameIsEnded && anyoneInGame && !state.isHost) {
         sessionStorage.setItem('gameMode', data.gameMode || 'together');
         sessionStorage.setItem('puzzleDateKey', data.puzzleDateKey);
         window.location.href = 'game.html';
@@ -762,6 +765,24 @@ function saveSettings() {
 
 // ── Init ──
 function init() {
+  // Restore state from sessionStorage if in-memory state was lost (e.g. page navigation)
+  if (!state.activeLobbyCode || !state.myPlayerId) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('lobbyState') || 'null');
+      if (saved && saved.activeLobbyCode && saved.myPlayerId) {
+        state.activeLobbyCode = saved.activeLobbyCode;
+        state.myPlayerId      = saved.myPlayerId;
+        state.isHost          = saved.isHost || false;
+        state.playerName      = saved.playerName || state.playerName;
+        state.pixelAvatarData = saved.pixelAvatarData || null;
+        if (saved.playerColorHex) {
+          const found = COLORS.find(c => c.hex === saved.playerColorHex);
+          if (found) state.playerColor = found;
+        }
+      }
+    } catch {}
+  }
+
   if (!state.activeLobbyCode || !state.myPlayerId) {
     window.location.href = 'index.html';
     return;

@@ -170,6 +170,14 @@ async function doJoin() {
     state.activeLobbyCode = code;
     state.isHost         = false;
     state.myPlayerId     = playerId;
+    sessionStorage.setItem('lobbyState', JSON.stringify({
+      activeLobbyCode: code,
+      myPlayerId: playerId,
+      isHost: false,
+      playerName: name,
+      playerColorHex: playerColor.hex,
+      pixelAvatarData: state.pixelAvatarData || null,
+    }));
     updateChip();
     closeOverlay('join-overlay');
     window.location.href = 'lobby.html';
@@ -191,6 +199,14 @@ async function goToLobby() {
     state.activeLobbyCode = code;
     state.isHost          = true;
     state.myPlayerId      = playerId;
+    sessionStorage.setItem('lobbyState', JSON.stringify({
+      activeLobbyCode: code,
+      myPlayerId: playerId,
+      isHost: true,
+      playerName: state.playerName,
+      playerColorHex: state.playerColor.hex,
+      pixelAvatarData: state.pixelAvatarData || null,
+    }));
     pruneStaleLobbies();
     window.location.href = 'lobby.html';
   } catch (e) {

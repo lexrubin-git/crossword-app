@@ -682,8 +682,7 @@ function subscribeLobbyFB() {
     // Game started — redirect to game.html
     if (data.status === 'started' && data.puzzleDateKey) {
       const gameIsEnded = data.gameSettings?.gameEnded === true;
-      const anyoneInGame = Object.values(players).some(p => p?.inGame);
-      if (!gameIsEnded && anyoneInGame && !state.isHost) {
+      if (!gameIsEnded && !state.isHost) {
         sessionStorage.setItem('gameMode', data.gameMode || 'together');
         sessionStorage.setItem('puzzleDateKey', data.puzzleDateKey);
         window.location.href = 'game.html';

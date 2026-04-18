@@ -5,8 +5,7 @@ import { mountDrawBlock, bakeAvatarDataUrl, drawVectorCanvas, updateAvatarPrevie
 import {
   updatePlayer, removePlayer, transferHost, setLobbyMode as setLobbyModeFB,
   castVote, removeVoteFB, sendChatMessage, startLobbyGame, removeLobby,
-  subscribeLobby, subscribeChat, pruneStaleLobbies,
-  pickRandomPuzzle as pickPuzzle
+  subscribeLobby, subscribeChat, pruneStaleLobbies
 } from '../api.service.js';
 import { pickRandomPuzzle, formatNytDateLabel, parseNytPuzzle, PUZZLE_POOL } from '../puzzle.js';
 import { fetchNytPuzzle } from '../api.service.js';
@@ -199,7 +198,7 @@ function renderPlayerList() {
     startDots('room-dots', 'room');
   }
 
-  const newKey = players.map(([id, p]) => `${id}:${p.name}:${p.colorHex}:${p.isHost?1:0}:${p.vote?1:0}:${p.inGame?1:0}`).join('|');
+  const newKey = players.map(([id, p]) => `${id}:${p.name||''}:${p.colorHex}:${p.isHost?1:0}:${p.vote?1:0}:${p.inGame?1:0}`).join('|');
   if (newKey === _lastPlayerListKey) return;
   _lastPlayerListKey = newKey;
 
@@ -207,6 +206,7 @@ function renderPlayerList() {
   if (!list) return;
   list.innerHTML = '';
   players.forEach(([id, p]) => {
+    if (!p.name) return;
     const isMe = id === state.myPlayerId;
     const canCtx = state.isHost && !isMe;
     const row = document.createElement('div');
@@ -526,7 +526,7 @@ function renderStartBtn() {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn-primary" id="start-game-btn"${startStyle}>Start game →</button>
       </div>
-      ${!modeSelected ? `<span style="font-size:12px;color:var(--text3);">Select a game mode to start</span>` : ''}
+      ${!modeSelected ? `<span style="font-size:12px;color:var(--text3);">Select a game mode/puzzle to start</span>` : ''}
       ${modeSelected  ? `<span style="font-size:12px;color:${allVoted?'#27ae60':'var(--text3)'};">${votedPlayers}/${totalPlayers} players voted</span>` : ''}
       ${inGamePlayers.length > 0 ? `<span style="font-size:12px;color:#e05151;">Waiting for ${inGamePlayers.length} player${inGamePlayers.length>1?'s':''} to return<span id="return-dots"></span></span>` : ''}
     </div>`;
@@ -577,7 +577,6 @@ async function _doStartGame() {
     const tiedEntries = entries.filter(([,v]) => v.count === maxVotes);
     let resolvedKey;
     if (tiedEntries.length > 1) {
-      // Simple random tiebreak (no animation in modular version to keep it light)
       resolvedKey = tiedEntries[Math.floor(Math.random() * tiedEntries.length)][0];
     } else {
       resolvedKey = entries[0][0];
@@ -615,7 +614,6 @@ function enterLobbyScreen() {
   if (copyLbl) copyLbl.textContent = 'Copy link';
   applyCodeVisibility();
 
-  // Clear chat
   const chatContainer = document.getElementById('chat-messages');
   if (chatContainer) {
     chatContainer.innerHTML = '';
@@ -629,7 +627,6 @@ function enterLobbyScreen() {
   setIdentityLocked(false);
   initLobbyIdentityEditor();
 
-  // Immediate snapshot for late-joiners
   if (window._fb) {
     const { get, ref, db } = window._fb;
     get(ref(db, `lobbies/${state.activeLobbyCode}`)).then(snap => {
@@ -673,9 +670,11 @@ function subscribeLobbyFB() {
     });
 
     // Kicked detection
-    if (state.myPlayerId && !stillInLobby) {
+    if (stillInLobby) state._seenInLobby = true;
+    if (state.myPlayerId && !stillInLobby && state._seenInLobby) {
       if (lobbyListener) { lobbyListener(); lobbyListener = null; }
       state.activeLobbyCode = null; state.myPlayerId = null; state.isHost = false;
+      state._seenInLobby = false;
       showToast('You were kicked from the lobby.');
       window.location.href = 'index.html';
       return;
@@ -695,10 +694,40 @@ function subscribeLobbyFB() {
 
     if (data.gameMode && data.gameMode !== state.lobbyMode) setLobbyMode(data.gameMode, true);
 
+    _lastPlayerListKey = '';
     renderPlayerList();
     renderVoteGrid();
     renderStartBtn();
     refreshLobbySwatches();
+
+    // Live-update chat messages if a player changed their name/color/avatar
+    const container = document.getElementById('chat-messages');
+    if (container) {
+      Object.entries(state.lastKnownPlayers).forEach(([id, p]) => {
+        container.querySelectorAll('.chat-msg').forEach(msgEl => {
+          if (msgEl.dataset.playerId !== id) return;
+          msgEl.style.cssText = `border-left:2.5px solid ${p.colorHex};padding-left:8px;margin-left:2px`;
+          const avatarEl = msgEl.querySelector('.chat-msg-avatar');
+          if (avatarEl) {
+            if (p.avatar) {
+              avatarEl.style.backgroundImage = `url(${p.avatar})`;
+              avatarEl.style.backgroundColor = p.colorHex;
+              avatarEl.style.border = `2px solid ${p.colorHex}`;
+              avatarEl.textContent = '';
+            } else {
+              avatarEl.style.backgroundImage = '';
+              avatarEl.style.backgroundColor = p.colorHex;
+              avatarEl.textContent = (p.name||'?').charAt(0).toUpperCase();
+            }
+          }
+          const nameEl = msgEl.querySelector('.chat-msg-name');
+          if (nameEl) {
+            nameEl.textContent = p.name || '';
+            nameEl.style.color = chatNameColor(p.colorHex);
+          }
+        });
+      });
+    }
 
     // Auto host transfer if host left
     const hostPresent = Object.values(state.lastKnownPlayers).some(p => p.isHost);
@@ -739,6 +768,7 @@ async function leaveLobby() {
   }
   state.activeLobbyCode = null; state.myPlayerId = null; state.isHost = false; state.lastLobbyData = null;
   state.myVote = null; state.lastKnownPlayers = {};
+  state._seenInLobby = false;
   window.location.href = 'index.html';
 }
 
@@ -765,7 +795,6 @@ function saveSettings() {
 
 // ── Init ──
 function init() {
-  // Restore state from sessionStorage if in-memory state was lost (e.g. page navigation)
   if (!state.activeLobbyCode || !state.myPlayerId) {
     try {
       const saved = JSON.parse(sessionStorage.getItem('lobbyState') || 'null');
@@ -790,7 +819,6 @@ function init() {
 
   enterLobbyScreen();
 
-  // Wire buttons
   document.getElementById('btn-leave-lobby')?.addEventListener('click', leaveLobby);
   document.getElementById('btn-settings')?.addEventListener('click', openSettings);
   document.getElementById('settings-save-btn')?.addEventListener('click', saveSettings);
@@ -813,15 +841,12 @@ function init() {
   document.getElementById('start-anyway-confirm')?.addEventListener('click', doStartGame);
   document.getElementById('start-anyway-cancel')?.addEventListener('click', () => closeOverlay('start-anyway-overlay'));
 
-  // Mode cards
   document.getElementById('mode-card-together')?.addEventListener('click', () => setLobbyMode('together'));
   document.getElementById('mode-card-versus')?.addEventListener('click', () => setLobbyMode('versus'));
 
-  // Lobby size / diff
   document.querySelectorAll('.lobby-size-btn').forEach(b => b.addEventListener('click', () => setLobbySize(b.dataset.size)));
   document.querySelectorAll('.lobby-diff-btn').forEach(b => b.addEventListener('click', () => setLobbyDiff(b.dataset.diff)));
 
-  // Context menu actions
   document.getElementById('player-ctx-give-host')?.addEventListener('click', () => ctxAction('giveHost'));
   document.getElementById('player-ctx-kick')?.addEventListener('click', () => ctxAction('kick'));
 }
@@ -831,29 +856,28 @@ function waitAndInit() {
   else document.addEventListener('fb-ready', init, { once: true });
 }
 
-// Expose to window for any remaining HTML handler refs
-window.leaveLobby       = leaveLobby;
-window.bannerCopy       = bannerCopy;
-window.toggleCodeVisibility = toggleCodeVisibility;
-window.revealCode       = revealCode;
-window.onLobbyNameInput = onLobbyNameInput;
-window.saveLobbyIdentity = saveLobbyIdentity;
+window.leaveLobby            = leaveLobby;
+window.bannerCopy            = bannerCopy;
+window.toggleCodeVisibility  = toggleCodeVisibility;
+window.revealCode            = revealCode;
+window.onLobbyNameInput      = onLobbyNameInput;
+window.saveLobbyIdentity     = saveLobbyIdentity;
 window.openLobbyPixelOverlay = openLobbyPixelOverlay;
-window.lobbyCancel      = lobbyCancel;
-window.saveLobbyPixelAvatar = saveLobbyPixelAvatar;
-window.setLobbyMode     = setLobbyMode;
-window.setLobbySize     = setLobbySize;
-window.setLobbyDiff     = setLobbyDiff;
-window.castLobbyVote    = castLobbyVote;
-window.removeVote       = removeVote;
-window.startGame        = startGame;
-window.doStartGame      = doStartGame;
-window.joinActiveMatch  = joinActiveMatch;
+window.lobbyCancel           = lobbyCancel;
+window.saveLobbyPixelAvatar  = saveLobbyPixelAvatar;
+window.setLobbyMode          = setLobbyMode;
+window.setLobbySize          = setLobbySize;
+window.setLobbyDiff          = setLobbyDiff;
+window.castLobbyVote         = castLobbyVote;
+window.removeVote            = removeVote;
+window.startGame             = startGame;
+window.doStartGame           = doStartGame;
+window.joinActiveMatch       = joinActiveMatch;
 window.setGameInProgressLock = setGameInProgressLock;
-window.unlockGamePanels = unlockGamePanels;
-window.openSettings     = openSettings;
-window.saveSettings     = saveSettings;
-window.ctxAction        = ctxAction;
-window.closeOverlay     = closeOverlay;
+window.unlockGamePanels      = unlockGamePanels;
+window.openSettings          = openSettings;
+window.saveSettings          = saveSettings;
+window.ctxAction             = ctxAction;
+window.closeOverlay          = closeOverlay;
 
 waitAndInit();

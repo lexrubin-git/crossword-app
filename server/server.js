@@ -71,6 +71,15 @@ app.use('/api/puzzles', puzzleRoutes);
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/pages/index.html'));
 });
+app.get('/index.html', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/pages/index.html'));
+});
+app.get('/lobby.html', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/pages/lobby.html'));
+});
+app.get('/game.html', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/pages/game.html'));
+});
 
 // ── Global error handler ───────────────────────────
 app.use((err, req, res, _next) => {

@@ -15,7 +15,7 @@
   .waiting-layout { grid-template-columns: 1fr; }
   .waiting-layout > div[style*="width:1px"] { display: none; }
 }
-.waiting-middle { display: flex; flex-direction: column; gap: 20px; }
+.waiting-left { display: flex; flex-direction: column; }
 
 /* ── Identity editor ── */
 .identity-editor {
@@ -57,16 +57,15 @@
   flex-shrink: 0;
 }
 .player-badge.host {
-  background: transparent !important;
-  color: var(--text) !important;
-  border: 1.5px solid rgba(255,255,255,0.75) !important;
+  background: #ffffff !important;
+  color: #111111 !important;
+  border: 1.5px solid #ffffff !important;
   border-radius: 6px !important;
   font-size: 11px;
   font-weight: 600;
   padding: 3px 10px;
   letter-spacing: 0.03em;
   margin-left: auto;
-}
 }
 .player-badge.in-game { background: rgba(212,160,23,0.18); color: #d4a017; border-color: rgba(212,160,23,0.4); }
 

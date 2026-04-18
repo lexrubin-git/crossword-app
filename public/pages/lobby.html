@@ -26,7 +26,7 @@
   </div>
 </div>
 
-<!-- ══ Shared pixel-draw block (teleported into whichever overlay is open) ══ -->
+<!-- ══ Shared pixel-draw block ══ -->
 <div id="pixel-draw-block" style="display:none">
   <div class="pixel-toolbar">
     <div id="pixel-palette"></div>
@@ -89,39 +89,6 @@
   </div>
 </div>
 
-<!-- ══ Settings overlay ══ -->
-<div class="overlay-backdrop hidden" id="settings-overlay">
-  <div class="settings-card">
-    <div class="overlay-title" style="margin-bottom:4px">Game settings</div>
-    <p class="overlay-sub2">Only the host can change these.</p>
-    <div class="settings-section">
-      <div class="settings-section-title">Visibility</div>
-      <div class="settings-row">
-        <div><div class="settings-label">Hide code from players</div><div class="settings-desc">Only the host can see the lobby code</div></div>
-        <div class="settings-control toggle-wrap"><input type="checkbox" class="toggle-input" id="s-hide-code"><label class="toggle-track" for="s-hide-code"></label></div>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Chat</div>
-      <div class="settings-row">
-        <div><div class="settings-label">Disable chat</div><div class="settings-desc">Turn off chat for all players</div></div>
-        <div class="settings-control toggle-wrap"><input type="checkbox" class="toggle-input" id="s-disable-chat"><label class="toggle-track" for="s-disable-chat"></label></div>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Voting</div>
-      <div class="settings-row">
-        <div><div class="settings-label">Host overrules votes</div><div class="settings-desc">Host can override the players' map vote</div></div>
-        <div class="settings-control toggle-wrap"><input type="checkbox" class="toggle-input" id="s-host-overrule"><label class="toggle-track" for="s-host-overrule"></label></div>
-      </div>
-    </div>
-    <div class="settings-footer">
-      <button class="btn-ghost" id="settings-cancel-btn">Cancel</button>
-      <button class="btn-primary" id="settings-save-btn">Save settings</button>
-    </div>
-  </div>
-</div>
-
 <!-- ══ Start-anyway confirm ══ -->
 <div id="start-anyway-overlay" class="overlay-backdrop hidden" style="z-index:610">
   <div class="overlay-card" style="max-width:360px;padding:32px 28px">
@@ -137,7 +104,7 @@
 <!-- ══ Player context menu ══ -->
 <div id="player-ctx-menu" style="display:none;position:fixed;z-index:9999;background:var(--card-bg);border:1.5px solid var(--border2);border-radius:8px;padding:4px;min-width:148px;box-shadow:0 4px 20px rgba(0,0,0,.5)">
   <div id="player-ctx-give-host" style="padding:8px 12px;font-size:13px;cursor:pointer;color:var(--text);border-radius:6px">Give host</div>
-  <div id="player-ctx-kick"      style="padding:8px 12px;font-size:13px;cursor:pointer;color:#e05151;border-radius:6px">Kick player</div>
+  <div id="player-ctx-kick" style="padding:8px 12px;font-size:13px;cursor:pointer;color:#e05151;border-radius:6px">Kick player</div>
 </div>
 
 <!-- ══ Avatar lightbox ══ -->
@@ -187,11 +154,6 @@
             </button>
           </div>
         </div>
-        <button class="btn-ghost" id="btn-settings" title="Game settings" style="padding:8px 10px">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-        </button>
       </div>
     </div>
 
@@ -274,7 +236,7 @@
                 <div style="margin-bottom:12px">
                   <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Size</div>
                   <div style="display:flex;gap:6px;flex-wrap:wrap">
-                    <button class="filter-chip lobby-size-btn active" data-size="standard" style="font-size:11px;padding:4px 10px">Standard 15×15</button>
+                    <button class="filter-chip lobby-size-btn" data-size="standard" style="font-size:11px;padding:4px 10px">Standard 15×15</button>
                     <button class="filter-chip lobby-size-btn" data-size="large" style="font-size:11px;padding:4px 10px">Large 21×21</button>
                   </div>
                 </div>
@@ -282,7 +244,7 @@
                   <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Difficulty</div>
                   <div id="lobby-diff-standard" style="display:flex;gap:6px;flex-wrap:wrap">
                     <button class="filter-chip lobby-diff-btn" data-diff="easy" style="font-size:11px;padding:4px 10px">Easy</button>
-                    <button class="filter-chip lobby-diff-btn active" data-diff="medium" style="font-size:11px;padding:4px 10px">Medium</button>
+                    <button class="filter-chip lobby-diff-btn" data-diff="medium" style="font-size:11px;padding:4px 10px">Medium</button>
                     <button class="filter-chip lobby-diff-btn" data-diff="hard" style="font-size:11px;padding:4px 10px">Hard</button>
                   </div>
                   <div id="lobby-diff-large" style="display:none;gap:6px;flex-wrap:wrap">
@@ -298,16 +260,18 @@
         </div>
 
         <!-- Start button -->
-        <div style="margin-top:0" id="start-btn-wrap"></div>
+        <div style="margin-top:16px" id="start-btn-wrap"></div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Firebase -->
+<!-- Firebase + Controller -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getDatabase, ref, set, get, update, remove, push, onValue, onChildAdded, onChildChanged, serverTimestamp, onDisconnect } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
+  import '../js/controllers/lobby.controller.js';
+
   const app = initializeApp({
     apiKey: "AIzaSyBBPKt8u3hkRkFZ0kFurQ6tmEDJQlWNDhw",
     authDomain: "crosswordlex.firebaseapp.com",
@@ -320,10 +284,6 @@
   window._fb = { db: getDatabase(app), ref, set, get, update, remove, push, onValue, onChildAdded, onChildChanged, serverTimestamp, onDisconnect };
   window._fbReady = true;
   document.dispatchEvent(new Event('fb-ready'));
-</script>
-
-<script type="module">
-  import '../js/controllers/lobby.controller.js';
 
   // Pixel toolbar wiring
   document.getElementById('size-minus')?.addEventListener('click', () => window.stepBrushSize(-1));

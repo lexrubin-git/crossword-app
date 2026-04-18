@@ -45,6 +45,10 @@
   background: var(--player-row-bg); border: 0.5px solid var(--border); border-radius: 10px;
   padding: 10px 14px; font-size: 13px; color: var(--text);
 }
+.player-row.is-me {
+  border: 2px solid rgba(255, 255, 255, 0.85) !important;
+}
+
 .player-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .player-badge {
   margin-left: auto; font-size: 10px; padding: 2px 8px;

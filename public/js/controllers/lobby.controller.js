@@ -211,7 +211,7 @@ function renderPlayerList() {
     const canCtx = state.isHost && !isMe;
     const row = document.createElement('div');
     row.className = 'player-row';
-    if (isMe) row.style.border = '1px solid rgba(255,255,255,0.85)';
+    if (isMe) row.style.border = '2px solid rgba(255,255,255,0.9)';
     row.innerHTML = `
       <div class="player-dot" style="background:${p.colorHex};flex-shrink:0"></div>
       <div style="flex:1;min-width:0"><span style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</span></div>

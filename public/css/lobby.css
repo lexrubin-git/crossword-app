@@ -51,7 +51,16 @@
   border-radius: 10px; background: var(--bg2); color: var(--text4);
   border: 0.5px solid var(--border);
 }
-.player-badge.host { background: var(--text); color: var(--bg); border-color: var(--text); }
+.player-badge.host {
+  background: transparent;
+  color: var(--text);
+  border: 1.5px solid rgba(255,255,255,0.75);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  letter-spacing: 0.03em;
+}
 .player-badge.in-game { background: rgba(212,160,23,0.18); color: #d4a017; border-color: rgba(212,160,23,0.4); }
 
 .player-dots-btn {

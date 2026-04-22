@@ -62,7 +62,7 @@
 /* ── Grid area ── */
 .game-grid-wrap {
   display: flex; flex-direction: column; align-items: center;
-  justify-content: flex-start; padding: 8px 12px 14px; overflow-y: auto;
+  justify-content: flex-start; padding: 8px 12px 40px; overflow-y: auto;
   background: var(--bg);
 }
 .game-active-clue {
@@ -206,7 +206,7 @@
   font-size: 9px; font-weight: 700; color: #fff;
   background-size: cover; background-position: center;
 }
-.game-score-name { flex: 1; font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-score-name { flex: 1; font-size: 12px; color: var(--text2); overflow: visible; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 .game-score-val { font-size: 13px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .game-score-row.me { cursor: pointer; }
 .game-score-row.me:hover { background: var(--btn-ghost-hover); }
@@ -283,11 +283,12 @@
 .versus-previews-wrap {
   width: 100%; max-width: 680px; margin-top: 14px;
   display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;
+  padding-bottom: 20px;
 }
 .versus-preview-player { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .versus-mini-grid { display: grid; border: 1px solid var(--border2); border-radius: 4px; overflow: hidden; }
-.versus-mini-cell { background: var(--bg2); border: 0.5px solid var(--border); }
-.versus-mini-cell.black { background: #1a1a1a; border-color: #111; }
+.versus-mini-cell { background: #ffffff; border: 0.5px solid #c0c0c0; box-sizing: border-box; }
+.versus-mini-cell.black { background: #1a1a1a !important; border: 0.5px solid #111 !important; }
 .versus-mini-cell.filled { background: #666666; }
 .versus-mini-cell.correct { background: #27ae60; }
 .versus-preview-name {

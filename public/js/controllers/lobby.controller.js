@@ -92,12 +92,14 @@ function updateLobbyAvatar() {
   if (pixelAvatarData) {
     av.style.backgroundImage = `url(${pixelAvatarData})`;
     av.style.backgroundSize = 'cover';
+    av.style.backgroundPosition = 'center';
     av.style.backgroundColor = playerColor.hex;
     av.style.border = `3px solid ${playerColor.hex}`;
     av.textContent = '';
   } else {
     av.style.backgroundImage = '';
-    av.style.border = '';
+    av.style.backgroundSize = '';
+    av.style.border = `3px solid ${playerColor.hex}`;
     av.style.background = playerColor.hex;
     av.textContent = (playerName || '?').charAt(0).toUpperCase();
   }
@@ -113,15 +115,18 @@ async function saveLobbyIdentity() {
   const val = document.getElementById('lobby-name-input').value.trim();
   if (!val) return;
   const prevColor = state.playerColor.hex;
+  const prevAvatar = state.pixelAvatarData;
   state.playerName = val;
   updateLobbyAvatar();
   updateChip();
   if (state.lastKnownPlayers[state.myPlayerId]) {
     state.lastKnownPlayers[state.myPlayerId].name     = state.playerName;
     state.lastKnownPlayers[state.myPlayerId].colorHex = state.playerColor.hex;
+    state.lastKnownPlayers[state.myPlayerId].avatar = state.pixelAvatarData || null;
     renderPlayerList();
+    renderVoteGrid();
   }
-  if (state.playerColor.hex !== prevColor) {
+  if (state.playerColor.hex !== prevColor || state.pixelAvatarData !== prevAvatar) {
     repaintLobbyChatColor(state.myPlayerId, state.playerName, state.playerColor.hex);
   }
   if (state.activeLobbyCode && state.myPlayerId) {
@@ -135,7 +140,7 @@ async function saveLobbyIdentity() {
 
 // ── Lobby avatar pixel overlay ──
 function openLobbyPixelOverlay() {
-  mountDrawBlock('lobby-canvas-slot');
+  mountDrawBlock('lobby-canvas-slot', state.pixelAvatarData || null);
   openOverlay('lobby-pixel-overlay');
 }
 
@@ -146,8 +151,22 @@ async function saveLobbyPixelAvatar() {
   if (avatarData) state.pixelAvatarData = avatarData;
   updateLobbyAvatar();
   closeOverlay('lobby-pixel-overlay');
+  if (state.lastKnownPlayers[state.myPlayerId]) {
+    state.lastKnownPlayers[state.myPlayerId].avatar   = state.pixelAvatarData || null;
+    state.lastKnownPlayers[state.myPlayerId].colorHex = state.playerColor.hex;
+    state.lastKnownPlayers[state.myPlayerId].name     = state.playerName;
+  }
+  _lastPlayerListKey = '';
+  renderPlayerList();
+  renderVoteGrid();
+  repaintLobbyChatColor(state.myPlayerId, state.playerName, state.playerColor.hex);
+  updateChip();
   if (state.activeLobbyCode && state.myPlayerId) {
-    updatePlayer(state.activeLobbyCode, state.myPlayerId, { avatar: state.pixelAvatarData || null }).catch(() => {});
+    updatePlayer(state.activeLobbyCode, state.myPlayerId, {
+      name: state.playerName,
+      colorHex: state.playerColor.hex,
+      avatar: state.pixelAvatarData || null,
+    }).catch(() => {});
   }
 }
 
@@ -173,8 +192,15 @@ async function ctxAction(action) {
   if (menu) menu.style.display = 'none';
   if (!_ctxTargetId || !state.activeLobbyCode) return;
   if (action === 'kick') {
-    try { await removePlayer(state.activeLobbyCode, _ctxTargetId); showToast('Player kicked.'); }
-    catch { showToast('Could not kick player.'); }
+    try {
+      await removePlayer(state.activeLobbyCode, _ctxTargetId);
+      delete state.lastKnownPlayers[_ctxTargetId];
+      _lastPlayerListKey = '';
+      renderPlayerList();
+      renderVoteGrid();
+      renderStartBtn();
+      showToast('Player kicked.');
+    } catch { showToast('Could not kick player.'); }
   } else if (action === 'giveHost') {
     try { await transferHost(state.activeLobbyCode, _ctxTargetId, state.myPlayerId); state.isHost = false; showToast('Host transferred.'); renderStartBtn(); }
     catch { showToast('Could not transfer host.'); }
@@ -189,7 +215,7 @@ function renderPlayerList() {
 
   const subtitleEl = document.getElementById('lobby-subtitle');
   if (players.length <= 1) {
-    if (subtitleEl && !document.getElementById('waiting-dots')) {
+    if (subtitleEl) {
       subtitleEl.innerHTML = 'Waiting for players to join<span id="waiting-dots"></span>';
       startDots('waiting-dots', 'waiting');
     }
@@ -198,7 +224,8 @@ function renderPlayerList() {
     startDots('room-dots', 'room');
   }
 
-  const newKey = players.map(([id, p]) => `${id}:${p.name||''}:${p.colorHex}:${p.isHost?1:0}:${p.vote?1:0}:${p.inGame?1:0}`).join('|');
+  console.log('renderPlayerList called, players:', JSON.stringify(players));
+  const newKey = players.map(([id, p]) => `${id}:${p.name||''}:${p.colorHex}:${p.avatar||''}:${p.isHost?1:0}:${p.vote?1:0}:${p.inGame?1:0}`).join('|');
   if (newKey === _lastPlayerListKey) return;
   _lastPlayerListKey = newKey;
 
@@ -206,7 +233,7 @@ function renderPlayerList() {
   if (!list) return;
   list.innerHTML = '';
   players.forEach(([id, p]) => {
-    if (!p.name) return;
+    const displayName = p.name || (id === state.myPlayerId ? state.playerName : 'Player');
     const isMe = id === state.myPlayerId;
     const canCtx = state.isHost && !isMe;
     const row = document.createElement('div');
@@ -214,12 +241,14 @@ function renderPlayerList() {
     if (isMe) row.classList.add('is-me');
     row.innerHTML = `
       <div class="player-dot" style="background:${p.colorHex};flex-shrink:0"></div>
-      <div style="flex:1;min-width:0"><span style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.name}</span></div>
-      ${p.isHost ? '<span class="player-badge host">host</span>' : ''}
-      ${canCtx ? `<button class="player-dots-btn" title="Player options">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
-      </button>` : ''}
-      ${p.inGame ? '<span class="player-badge in-game">in game</span>' : ''}
+      <div style="flex:1;min-width:0"><span style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${displayName}</span></div>
+      <div style="display:flex;align-items:center;gap:4px;margin-left:auto">
+        ${p.isHost ? '<span class="player-badge host" style="margin-left:0">host</span>' : ''}
+        ${p.inGame ? '<span class="player-badge in-game" style="margin-left:0">in game</span>' : ''}
+        ${canCtx ? `<button class="player-dots-btn" title="Player options">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+        </button>` : ''}
+      </div>
     `;
     if (canCtx) {
       const dotsBtn = row.querySelector('.player-dots-btn');
@@ -240,7 +269,6 @@ function renderChat(msgs) {
   const entries = Object.values(msgs).sort((a, b) => a.ts - b.ts);
   if (!entries.length) { if (empty) empty.style.display = 'flex'; return; }
   if (empty) empty.style.display = 'none';
-  if (container.dataset.count === String(entries.length)) return;
   container.dataset.count = entries.length;
   container.innerHTML = '';
   if (empty) container.appendChild(empty);
@@ -302,7 +330,26 @@ function repaintLobbyChatColor(playerId, name, newHex) {
     msgEl.dataset.colorHex = newHex;
     msgEl.style.cssText = `border-left:2.5px solid ${newHex};padding-left:8px;margin-left:2px`;
     const avatarEl = msgEl.querySelector('.chat-msg-avatar');
-    if (avatarEl) avatarEl.style.backgroundColor = newHex;
+    if (avatarEl) {
+      const newAvatar = state.pixelAvatarData || null;
+      if (newAvatar) {
+        avatarEl.style.backgroundImage = `url(${newAvatar})`;
+        avatarEl.style.backgroundSize  = 'cover';
+        avatarEl.style.backgroundColor = newHex;
+        avatarEl.style.border          = `2px solid ${newHex}`;
+        avatarEl.style.boxSizing       = 'border-box';
+        avatarEl.textContent           = '';
+        avatarEl.dataset.avatar        = newAvatar;
+      } else {
+        avatarEl.style.backgroundImage = '';
+        avatarEl.style.border          = '';
+        avatarEl.style.backgroundColor = newHex;
+        avatarEl.textContent           = (name || '?').charAt(0).toUpperCase();
+        avatarEl.dataset.avatar        = '';
+      }
+      avatarEl.dataset.color = newHex;
+      avatarEl.dataset.name  = name;
+    }
     if (nameEl) nameEl.style.color = chatNameColor(newHex);
   });
 }
@@ -336,7 +383,14 @@ function castVoteForDateKey(key, size, diff) {
 
 function removeVote() {
   state.myVote = null;
-  if (state.lastKnownPlayers[state.myPlayerId]) state.lastKnownPlayers[state.myPlayerId].vote = null;
+  state.myVoteMeta = null;
+  if (state.lastKnownPlayers[state.myPlayerId]) {
+    state.lastKnownPlayers[state.myPlayerId].vote = null;
+    state.lastKnownPlayers[state.myPlayerId].voteMeta = null;
+  }
+  lobbySize = null; lobbyDiff = null;
+  document.querySelectorAll('.lobby-size-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.lobby-diff-btn').forEach(b => b.classList.remove('active'));
   setIdentityLocked(false);
   renderVoteGrid();
   if (state.isHost) renderStartBtn();
@@ -378,7 +432,6 @@ function renderVoteGrid() {
   const grid = document.getElementById('vote-grid');
   if (!grid) return;
   grid.innerHTML = '';
-
   const dateCounts = {};
   players.forEach(p => {
     if (p.vote) {
@@ -387,15 +440,25 @@ function renderVoteGrid() {
     }
   });
 
-  if (!Object.keys(dateCounts).length) return;
+  const votesCard = document.getElementById('current-votes-card');
+  if (!Object.keys(dateCounts).length) {
+    if (votesCard) votesCard.style.display = 'none';
+    return;
+  }
+  if (votesCard) votesCard.style.display = '';
+
+0
 
   Object.entries(dateCounts).sort((a,b) => b[1].voters.length - a[1].voters.length)
     .forEach(([dateKey, {voters, meta}]) => {
       const isMyVote = state.myVote === dateKey;
       const row = document.createElement('div');
-      row.style.cssText = `display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;transition:background .15s,border-color .15s;background:${isMyVote?'rgba(255,255,255,0.04)':'var(--card-bg)'};border:1.5px solid ${isMyVote?'var(--text)':'var(--border)'};outline:${isMyVote?'1px solid var(--text)':'none'};`;
+      row.style.cssText = `display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;transition:background .15s;`;
+      if (grid.children.length > 0) row.style.borderTop = '0.5px solid var(--border)';
+      // FIX 1: clicking your own vote row deselects it
       row.addEventListener('click', () => {
-        if (!isMyVote) castVoteForDateKey(dateKey, meta.size, meta.diff);
+        if (isMyVote) removeVote();
+        else castVoteForDateKey(dateKey, meta.size, meta.diff);
       });
       const dots = voters.slice(0,6).map(v => {
         const bg = v.avatar ? `background-image:url(${v.avatar});background-size:cover;background-color:${v.colorHex}` : `background:${v.colorHex}`;
@@ -431,23 +494,40 @@ function setLobbyMode(mode, fromSync = false) {
     return;
   }
   state.lobbyMode = mode;
+  // If deselecting game mode, also remove vote
+  if (mode === null) { removeVote(); lobbySize = null; lobbyDiff = null; document.querySelectorAll('.lobby-size-btn').forEach(b => b.classList.remove('active')); document.querySelectorAll('.lobby-diff-btn').forEach(b => b.classList.remove('active')); }
   const togetherCard = document.getElementById('mode-card-together');
   const versusCard   = document.getElementById('mode-card-versus');
   if (togetherCard && versusCard) {
-    const selBg = '#ffffff', selText = '#111111';
-    togetherCard.style.border = `1.5px solid ${mode === 'together' ? 'var(--text)' : 'var(--border)'}`;
+    const selBg = 'rgba(212,160,23,0.06)', selText = '#d4a017';
     togetherCard.style.background = mode === 'together' ? selBg : 'var(--bg2)';
-    togetherCard.querySelectorAll('div').forEach(el => { el.style.color = mode === 'together' ? selText : ''; });
-    versusCard.style.border = `1.5px solid ${mode === 'versus' ? 'var(--text)' : 'var(--border)'}`;
+    togetherCard.style.borderTop = mode === 'together' ? '2px solid rgba(212,160,23,0.7)' : '2px solid transparent';
+    togetherCard.style.padding = '12px 14px 16px';
+    const t1 = togetherCard.children[0], t2 = togetherCard.children[1];
+    if (t1) t1.style.color = mode === 'together' ? selText : 'var(--text)';
+    if (t2) t2.style.color = mode === 'together' ? 'rgba(212,160,23,0.5)' : 'var(--text2)';
     versusCard.style.background = mode === 'versus' ? selBg : 'var(--bg2)';
-    versusCard.querySelectorAll('div').forEach(el => { el.style.color = mode === 'versus' ? selText : ''; });
+    versusCard.style.borderTop = mode === 'versus' ? '2px solid rgba(212,160,23,0.7)' : '2px solid transparent';
+    versusCard.style.padding = '12px 14px 16px';
+    const v1 = versusCard.children[0], v2 = versusCard.children[1];
+    if (v1) v1.style.color = mode === 'versus' ? selText : 'var(--text)';
+    if (v2) v2.style.color = mode === 'versus' ? 'rgba(212,160,23,0.5)' : 'var(--text2)';
   }
   if (state.isHost && state.activeLobbyCode) {
-    setLobbyModeFB(state.activeLobbyCode, mode).catch(() => {});
+    setLobbyModeFB(state.activeLobbyCode, mode || '').catch(() => {});
   }
+  renderStartBtn();
 }
 
 function setLobbySize(size) {
+  if (lobbySize === size) {
+    lobbySize = null;
+    lobbyDiff = null;
+    document.querySelectorAll('.lobby-size-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.lobby-diff-btn').forEach(b => b.classList.remove('active'));
+    removeVote();
+    return;
+  }
   lobbySize = size;
   document.querySelectorAll('.lobby-size-btn').forEach(b => b.classList.toggle('active', b.dataset.size === size));
   const standardDiff = document.getElementById('lobby-diff-standard');
@@ -464,6 +544,16 @@ function setLobbySize(size) {
 }
 
 function setLobbyDiff(diff) {
+  if (lobbyDiff === diff) {
+    lobbyDiff = null;
+    document.querySelectorAll('.lobby-diff-btn').forEach(b => b.classList.remove('active'));
+    if (state.activeLobbyCode && state.myPlayerId) removeVoteFB(state.activeLobbyCode, state.myPlayerId).catch(() => {});
+    state.myVote = null; state.myVoteMeta = null;
+    if (state.lastKnownPlayers[state.myPlayerId]) { state.lastKnownPlayers[state.myPlayerId].vote = null; state.lastKnownPlayers[state.myPlayerId].voteMeta = null; }
+    setIdentityLocked(false); renderVoteGrid(); if (state.isHost) renderStartBtn();
+    return;
+  }
+  if (!lobbySize) return;
   lobbyDiff = diff;
   document.querySelectorAll('.lobby-diff-btn').forEach(b => b.classList.toggle('active', b.dataset.diff === diff));
   castLobbyVote();
@@ -506,35 +596,57 @@ function renderStartBtn() {
   }
   unlockGamePanels();
 
+  const players = Object.values(state.lastKnownPlayers);
+  const totalPlayers  = players.length;
+  const votedPlayers  = players.filter(p => p.vote).length;
+  const allVoted      = totalPlayers > 0 && votedPlayers >= totalPlayers;
+
+  // FIX 2: non-hosts see "waiting for host" + vote count below
   if (!state.isHost) {
-    wrap.innerHTML = `<p style="font-size:13px;color:#999">Waiting for the host to start<span id="host-start-dots"></span></p>`;
+    wrap.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <p style="font-size:13px;color:#999;margin:0">Waiting for the host to start<span id="host-start-dots"></span></p>
+        <span style="font-size:12px;color:${allVoted?'#27ae60':'#e05151'}">${votedPlayers}/${totalPlayers} players voted<span id="voted-dots" style="color:${allVoted?'#27ae60':'#e05151'}"></span></span>
+      </div>`;
     startDots('host-start-dots', 'hostStart');
+    if (document.getElementById('voted-dots')) startDots('voted-dots', 'votedDots');
     return;
   }
 
-  const players = Object.values(state.lastKnownPlayers);
-  const totalPlayers   = players.length;
-  const votedPlayers   = players.filter(p => p.vote).length;
   const inGamePlayers  = players.filter(p => p.inGame && !p.isHost);
-  const allVoted       = totalPlayers > 0 && votedPlayers >= totalPlayers;
   const modeSelected   = state.lobbyMode !== null;
-  const startDisabled  = inGamePlayers.length > 0 || !modeSelected;
+  const puzzleSelected = players.some(p => p.vote);
+  const startDisabled  = inGamePlayers.length > 0 || !modeSelected || !puzzleSelected;
   const startStyle     = startDisabled ? ' style="opacity:0.45;cursor:not-allowed"' : '';
 
+  const gameActive = data && data.status === 'started' && !(data.gameSettings?.gameEnded);
   wrap.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn-primary" id="start-game-btn"${startStyle}>Start game →</button>
+        ${gameActive ? `<button class="btn-ghost" id="lobby-forfeit-btn" style="font-size:12px;color:#e05151;border-color:#e05151">End game</button>` : ''}
       </div>
-      ${!modeSelected ? `<span style="font-size:12px;color:var(--text3);">Select a game mode/puzzle to start</span>` : ''}
-      ${modeSelected  ? `<span style="font-size:12px;color:${allVoted?'#27ae60':'var(--text3)'};">${votedPlayers}/${totalPlayers} players voted</span>` : ''}
+      
+      <span style="font-size:12px;color:${allVoted?'#27ae60':'#e05151'}">${votedPlayers}/${totalPlayers} players voted<span id="voted-dots" style="color:${allVoted?'#27ae60':'#e05151'}"></span></span>
       ${inGamePlayers.length > 0 ? `<span style="font-size:12px;color:#e05151;">Waiting for ${inGamePlayers.length} player${inGamePlayers.length>1?'s':''} to return<span id="return-dots"></span></span>` : ''}
     </div>`;
 
   document.getElementById('start-game-btn')?.addEventListener('click', () => {
-    if (modeSelected && !startDisabled) startGame();
+    if (!startDisabled) { startGame(); return; }
+    const modeOverlay = document.getElementById('mode-missing-overlay');
+    const puzzleOverlay = document.getElementById('puzzle-missing-overlay');
+if (modeOverlay) { modeOverlay.style.pointerEvents = 'all'; modeOverlay.style.display = !modeSelected ? 'flex' : 'none'; if (!modeSelected) setTimeout(() => { modeOverlay.style.display = 'none'; modeOverlay.style.pointerEvents = 'none'; }, 1000); }
+    if (puzzleOverlay) { puzzleOverlay.style.pointerEvents = 'all'; puzzleOverlay.style.display = !puzzleSelected ? 'flex' : 'none'; if (!puzzleSelected) setTimeout(() => { puzzleOverlay.style.display = 'none'; puzzleOverlay.style.pointerEvents = 'none'; }, 1000); }
   });
   if (inGamePlayers.length > 0) startDots('return-dots', 'returnDots');
+  if (document.getElementById('voted-dots')) startDots('voted-dots', 'votedDots');
+  document.getElementById('lobby-forfeit-btn')?.addEventListener('click', () => {
+    if (!state.activeLobbyCode || !window._fb) return;
+    if (!confirm('End the current game for all players?')) return;
+    const { update, ref, db } = window._fb;
+    update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), { gameEnded: true }).catch(() => {});
+    showToast('Game ended.');
+  });
 }
 
 async function startGame() {
@@ -558,7 +670,239 @@ async function doStartGame() {
   await _doStartGame();
 }
 
+
+ function showTiebreakerRoulette(options, nonHost = false, winnerKey = null) {
+  return new Promise(resolve => {
+    const n = options.length;
+    const COLORS_WHEEL = ['#d4a017','#c0392b','#2980b9','#27ae60','#8e44ad','#e67e22','#16a085','#e74c3c'];
+    const segColors = options.map((opt, i) => {
+      const players = Object.values(state.lastKnownPlayers);
+      const voter = players.find(p => p.vote === opt.key);
+      return voter?.colorHex || COLORS_WHEEL[i % COLORS_WHEEL.length];
+    });
+    const segAngle = (2 * Math.PI) / n;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'roulette-overlay';
+    overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px`;
+
+    const title = document.createElement('div');
+    title.style.cssText = `color:var(--text,#e8e8e8);font-size:14px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;font-family:Inter,system-ui,sans-serif`;
+    title.textContent = "It's a tie!";
+
+    const card = document.createElement('div');
+    card.style.cssText = `background:var(--card-bg,#1c1c1c);border:0.5px solid var(--border,#2e2e2e);border-radius:16px;overflow:hidden;display:flex;flex-direction:column;align-items:center;font-family:Inter,system-ui,sans-serif`;
+
+    const cardHeader = document.createElement('div');
+    cardHeader.style.cssText = `width:100%;padding:12px 20px;border-bottom:0.5px solid var(--border,#2e2e2e);background:var(--bg3,#181818);display:flex;align-items:center;justify-content:space-between;box-sizing:border-box`;
+
+    const cardBody = document.createElement('div');
+    cardBody.style.cssText = `padding:28px;display:flex;flex-direction:column;align-items:center;gap:20px`;
+
+    const pointerWrap = document.createElement('div');
+    pointerWrap.style.cssText = `position:relative;width:420px;height:420px`;
+
+    const pointer = document.createElement('div');
+    pointer.style.cssText = `display:none`;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 420;
+    canvas.height = 420;
+    canvas.style.cssText = `border-radius:50%;display:block`;
+
+    pointerWrap.appendChild(canvas);
+    pointerWrap.appendChild(pointer);
+
+    const subtitle = document.createElement('div');
+    subtitle.style.cssText = `font-size:14px;color:#aaa;min-height:20px;text-align:center`;
+
+    const headerRight = document.createElement('span');
+    headerRight.style.cssText = `font-size:10px;color:var(--text3,#666);letter-spacing:.08em;font-family:Inter,system-ui,sans-serif`;
+    headerRight.textContent = 'TIEBREAKER';
+    cardHeader.appendChild(title);
+    cardHeader.appendChild(headerRight);
+    card.appendChild(cardHeader);
+    cardBody.appendChild(pointerWrap);
+    cardBody.appendChild(subtitle);
+    card.appendChild(cardBody);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const ctx = canvas.getContext('2d');
+    const cx = 210, cy = 210, r = 200, innerR = 30;
+
+    function getLabel(opt) {
+      const { size, diff } = opt.meta || {};
+      const sl = size === 'large' ? '21×21' : '15×15';
+      const dl = { easy:'Easy', medium:'Medium', hard:'Hard' }[diff] || diff || '';
+      return `${sl} ${dl}`;
+    }
+
+    // Pre-load voter avatars
+    const voterImages = options.map(opt => {
+      const players = Object.values(state.lastKnownPlayers);
+      const voter = players.find(p => p.vote === opt.key);
+      if (voter?.avatar) {
+        const img = new Image();
+        img.src = voter.avatar;
+        return { img, voter };
+      }
+      return { img: null, voter };
+    });
+
+    function darkenColor(hex, amount) {
+      const num = parseInt(hex.replace('#',''), 16);
+      const r = Math.max(0, (num >> 16) - Math.round(255 * amount));
+      const g = Math.max(0, ((num >> 8) & 0xff) - Math.round(255 * amount));
+      const b = Math.max(0, (num & 0xff) - Math.round(255 * amount));
+      return `rgb(${r},${g},${b})`;
+    }
+
+    function drawPointer() {
+      ctx.save();
+      ctx.translate(cx, cy);
+      const stemW = 8;
+      const stemAngle = Math.asin(stemW / innerR);
+      // Draw circle + arrow as one unified path
+      ctx.beginPath();
+      // Arrow tip
+      ctx.moveTo(0, -(innerR + 36));
+      // Right side of arrowhead
+      ctx.lineTo(18, -(innerR + 8));
+      ctx.lineTo(stemW, -(innerR + 8));
+      // Arc from right stem down and around bottom back to left stem
+      ctx.arc(0, 0, innerR, -(Math.PI / 2) + stemAngle, -(Math.PI / 2) - stemAngle + Math.PI * 2, false);
+      // Left side of stem and arrowhead
+      ctx.lineTo(-stemW, -(innerR + 8));
+      ctx.lineTo(-18, -(innerR + 8));
+      ctx.closePath();
+      // Fill
+      ctx.fillStyle = '#2a2a2a';
+      ctx.fill();
+      // Outline
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawWheel(angle) {
+      ctx.clearRect(0, 0, 420, 420);
+      for (let i = 0; i < n; i++) {
+        const start = angle + i * segAngle;
+        const end = start + segAngle;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, r, start, end);
+        ctx.closePath();
+        ctx.fillStyle = segColors[i];
+        ctx.fill();
+        ctx.strokeStyle = darkenColor(segColors[i], 0.3);
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(start + segAngle / 2);
+        // Label
+        ctx.textAlign = 'right';
+        ctx.fillStyle = darkenColor(segColors[i], 0.45);
+        ctx.font = `bold ${n > 5 ? 11 : 13}px Inter, system-ui, sans-serif`;
+        ctx.shadowBlur = 0;
+        ctx.fillText(getLabel(options[i]), r - 12, -14);
+        // Avatar
+        const avatarR = 16;
+        const avatarX = r - 60;
+        const { img, voter } = voterImages[i];
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avatarX, 8, avatarR, 0, 2 * Math.PI);
+        ctx.closePath();
+        ctx.clip();
+        if (img && img.complete && img.naturalWidth > 0) {
+          ctx.drawImage(img, avatarX - avatarR, 8 - avatarR, avatarR * 2, avatarR * 2);
+        } else {
+          ctx.fillStyle = voter?.colorHex || '#888';
+          ctx.fill();
+          ctx.restore();
+          // Border around default avatar
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(avatarX, 8, avatarR, 0, 2 * Math.PI);
+          ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(avatarX, 8, avatarR, 0, 2 * Math.PI);
+          ctx.clip();
+          ctx.fillStyle = '#fff';
+          ctx.font = `bold 9px Inter, system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.shadowBlur = 0;
+          ctx.fillText((voter?.name || '?').charAt(0).toUpperCase(), avatarX, 8 + 3);
+        }
+        ctx.restore();
+        ctx.restore();
+      }
+      drawPointer();
+    }
+
+    const winnerIdx = winnerKey
+      ? options.findIndex(o => o.key === winnerKey)
+      : Math.floor(Math.random() * options.length);
+    const safeWinnerIdx = winnerIdx >= 0 ? winnerIdx : 0;
+
+    const spins = 8;
+    // Deterministic offset based on winnerKey so host and non-host match
+    const seed = winnerKey ? winnerKey.split('').reduce((a, c) => a + c.charCodeAt(0), 0) : 0;
+    const randomOffset = ((seed % 100) / 100 - 0.5) * segAngle * 0.6;
+    // Arrow points up (-π/2). We want winner segment center at -π/2.
+    // Segment i center is at: angle + i*segAngle + segAngle/2
+    // So: angle + safeWinnerIdx*segAngle + segAngle/2 = -π/2
+    // angle = -π/2 - safeWinnerIdx*segAngle - segAngle/2
+    const targetAngle = -(spins * 2 * Math.PI) - Math.PI / 2 - (safeWinnerIdx * segAngle + segAngle / 2) + randomOffset;
+    const duration = 7000;
+
+    function easeOut(t) {
+      // Cubic ease — fast start, clearly visible slowdown
+      return 1 - Math.pow(1 - t, 3);
+    }
+
+    let startTime = null;
+
+    function animate(ts) {
+      if (!startTime) startTime = ts;
+      const elapsed = ts - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      const currentAngle = targetAngle * easeOut(t);
+      drawWheel(currentAngle);
+
+      if (t < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        drawWheel(targetAngle);
+        const winner = options[safeWinnerIdx];
+        const winnerVoter = Object.values(state.lastKnownPlayers).find(p => p.vote === winner.key);
+        title.innerHTML = `The wheel landed on <span style="color:${winnerVoter?.colorHex || '#d4a017'}">${winnerVoter?.name || 'a player'}</span>!`;
+        setTimeout(() => {
+          if (nonHost) {
+            title.textContent = 'Starting game…';
+            setTimeout(() => { overlay.remove(); }, 2000);
+          } else {
+            overlay.remove();
+            resolve(winner.key);
+          }
+        }, 1800);
+      }
+    }
+
+    drawWheel(0);
+    requestAnimationFrame(animate);
+  });
+}
+let _startGameInProgress = false;
 async function _doStartGame() {
+  if (_startGameInProgress) return;
+  _startGameInProgress = true;
   const players = Object.values(state.lastKnownPlayers);
   const dateCounts = {};
   players.forEach(p => {
@@ -577,32 +921,100 @@ async function _doStartGame() {
     const tiedEntries = entries.filter(([,v]) => v.count === maxVotes);
     let resolvedKey;
     if (tiedEntries.length > 1) {
-      resolvedKey = tiedEntries[Math.floor(Math.random() * tiedEntries.length)][0];
+      const rouletteOptions = tiedEntries.map(([k, v]) => ({ key: k, meta: v.meta }));
+      const winnerIdx = Math.floor(Math.random() * rouletteOptions.length);
+      const winnerKey = rouletteOptions[winnerIdx].key;
+      // Write options + winner to Firebase so non-hosts can run the same animation
+      if (window._fb) {
+        const { update, ref, db } = window._fb;
+        try { await update(ref(db, `lobbies/${state.activeLobbyCode}`), {
+          rouletteActive: true,
+          rouletteWinnerKey: winnerKey,
+          rouletteOptions: rouletteOptions.map(o => ({ key: o.key, size: o.meta?.size || '', diff: o.meta?.diff || '' }))
+        }); } catch {}
+      }
+      // Resolve the actual puzzle date key NOW before animating, so all players get the same one
+      const winnerMeta = rouletteOptions[winnerIdx].meta || {};
+      const prePicked = winnerKey.startsWith('combo:')
+        ? (pickRandomPuzzle(winnerMeta.size || 'standard', winnerMeta.diff || 'medium') || '1994/3/28')
+        : winnerKey;
+
+      // Write puzzle + roulette signal atomically so non-hosts have the key immediately
+      if (window._fb) {
+        const { update, ref, db } = window._fb;
+        try { await update(ref(db, `lobbies/${state.activeLobbyCode}`), {
+          rouletteActive: true,
+          rouletteWinnerKey: winnerKey,
+          rouletteOptions: rouletteOptions.map(o => ({ key: o.key, size: o.meta?.size || '', diff: o.meta?.diff || '' })),
+          pendingPuzzleDateKey: prePicked
+        }); } catch {}
+      }
+
+      resolvedKey = await showTiebreakerRoulette(rouletteOptions, false, winnerKey);
+      if (window._fb) {
+        const { update, ref, db } = window._fb;
+        update(ref(db, `lobbies/${state.activeLobbyCode}`), { rouletteActive: false, rouletteWinnerKey: null, rouletteOptions: null }).catch(() => {});
+      }
+      // chosenDateKey is already determined — use prePicked directly
+      chosenDateKey = prePicked;
     } else {
       resolvedKey = entries[0][0];
-    }
-    if (resolvedKey && resolvedKey.startsWith('combo:')) {
-      const parts = resolvedKey.split(':');
-      chosenDateKey = pickRandomPuzzle(parts[1] || 'standard', parts[2] || 'medium') || '1994/3/28';
-    } else {
-      chosenDateKey = resolvedKey;
+      if (resolvedKey && resolvedKey.startsWith('combo:')) {
+        const parts = resolvedKey.split(':');
+        chosenDateKey = pickRandomPuzzle(parts[1] || 'standard', parts[2] || 'medium') || '1994/3/28';
+      } else {
+        chosenDateKey = resolvedKey;
+      }
+
+      if (window._fb) {
+        const { update, ref, db } = window._fb;
+        try {
+          await update(ref(db, `lobbies/${state.activeLobbyCode}`), {
+            pendingPuzzleDateKey: chosenDateKey,
+          });
+        } catch {}
+      }
     }
   }
 
+
+
+  console.log('[START GAME] chosenDateKey:', chosenDateKey, 'isHost:', state.isHost);
   const btn = document.querySelector('#start-btn-wrap .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'Loading puzzle…'; }
 
   try {
     const rawData = await fetchNytPuzzle(chosenDateKey);
     const puzzle  = parseNytPuzzle(rawData, chosenDateKey);
-    sessionStorage.setItem('soloPuzzle', JSON.stringify(puzzle));
+    sessionStorage.removeItem('soloPuzzle');
     sessionStorage.setItem('gameMode', state.lobbyMode || 'together');
     sessionStorage.setItem('puzzleDateKey', chosenDateKey);
-    await startLobbyGame(state.activeLobbyCode, chosenDateKey, state.lobbyMode);
+    sessionStorage.setItem('freshGameStart', '1');
+    // Clear votes atomically in the same write as startLobbyGame to avoid
+    // extra Firebase round-trips that can overwrite sessionStorage before redirect
+    const voteClears = {};
+    Object.keys(state.lastKnownPlayers).forEach(id => {
+      voteClears[`players/${id}/vote`] = null;
+      voteClears[`players/${id}/voteMeta`] = null;
+    });
+    if (window._fb) {
+      const { update, ref, db } = window._fb;
+      try {
+        await update(ref(db, `lobbies/${state.activeLobbyCode}`), {
+          status: 'started',
+          puzzleDateKey: chosenDateKey,
+          pendingPuzzleDateKey: null,
+          startedAt: window._fb.serverTimestamp(),
+          gameMode: state.lobbyMode,
+          ...voteClears,
+        });
+      } catch {}
+    }
     window.location.href = 'game.html';
   } catch (e) {
     showToast('Failed to load puzzle: ' + e.message.slice(0, 60));
     if (btn) { btn.disabled = false; btn.textContent = 'Start game →'; }
+    _startGameInProgress = false;
   }
 }
 
@@ -626,48 +1038,128 @@ function enterLobbyScreen() {
   state.myVoteMeta = { size: 'standard', diff: 'medium' };
   setIdentityLocked(false);
   initLobbyIdentityEditor();
+  document.querySelectorAll('.lobby-diff-btn').forEach(b => { b.style.opacity = ''; b.style.pointerEvents = ''; });
 
+  if (!state.lastKnownPlayers[state.myPlayerId]) {
+    state.lastKnownPlayers[state.myPlayerId] = {
+      name: state.playerName,
+      colorHex: state.playerColor.hex,
+      avatar: state.pixelAvatarData || null,
+      vote: null,
+      voteMeta: null,
+      isHost: state.isHost || false,
+      inGame: false,
+    };
+  }
+  renderPlayerList();
+  renderStartBtn();
+
+  
+
+  subscribeChatFB();
+  subscribeLobbyFB();
+
+  // Fallback: if after 2 seconds we still only see ourselves, do a one-time get
+  setTimeout(() => {
+    if (Object.keys(state.lastKnownPlayers).length <= 1 && window._fb) {
+      const { get, ref, db } = window._fb;
+      get(ref(db, `lobbies/${state.activeLobbyCode}/players`)).then(snap => {
+        if (!snap.exists()) return;
+        const players = snap.val() || {};
+        Object.entries(players).forEach(([id, p]) => {
+          state.lastKnownPlayers[id] = {
+            name:     p.name     || '',
+            colorHex: p.colorHex || '#888888',
+            avatar:   p.avatar   || null,
+            vote:     p.vote     || null,
+            voteMeta: p.voteMeta || null,
+            isHost:   p.isHost   || false,
+            inGame:   p.inGame   || false,
+          };
+        });
+        _lastPlayerListKey = '';
+        renderPlayerList();
+        renderStartBtn();
+        refreshLobbySwatches();
+      }).catch(() => {});
+    }
+  }, 2000);
+
+  window.scrollTo(0, 0);
+}
+
+function subscribeLobbyFB() {
+  if (lobbyListener) { lobbyListener(); lobbyListener = null; }
+  let _firstSnapshotDone = false;
+  let _hasReceivedValidSnapshot = false;
+
+  // Load full player list once before subscription fires
   if (window._fb) {
     const { get, ref, db } = window._fb;
     get(ref(db, `lobbies/${state.activeLobbyCode}`)).then(snap => {
       if (!snap.exists()) return;
       const data = snap.val();
       const players = data.players || {};
-      state.lastKnownPlayers = {};
       Object.entries(players).forEach(([id, p]) => {
-        state.lastKnownPlayers[id] = { name:p.name, colorHex:p.colorHex, avatar:p.avatar||null, vote:p.vote||null, voteMeta:p.voteMeta||null, isHost:p.isHost||false };
-        if (id === state.myPlayerId) {
-          state.isHost = p.isHost || false;
-          if (p.vote) { state.myVote = p.vote; state.myVoteMeta = p.voteMeta || { size:'standard', diff:'medium' }; setIdentityLocked(true); }
-        }
+        state.lastKnownPlayers[id] = {
+          name:     p.name     || '',
+          colorHex: p.colorHex || '#888888',
+          avatar:   p.avatar   || null,
+          vote:     p.vote     || null,
+          voteMeta: p.voteMeta || null,
+          isHost:   p.isHost   || false,
+          inGame:   p.inGame   || false,
+        };
       });
-      renderPlayerList(); renderVoteGrid(); renderStartBtn(); refreshLobbySwatches();
-    }).catch(() => {});
+      _firstSnapshotDone = true;
+      _lastPlayerListKey = '';
+      renderPlayerList();
+      renderStartBtn();
+      refreshLobbySwatches();
+    }).catch(() => { _firstSnapshotDone = true; });
   }
 
-  subscribeLobbyFB();
-  subscribeChatFB();
-  window.scrollTo(0, 0);
-}
-
-function subscribeLobbyFB() {
-  if (lobbyListener) { lobbyListener(); lobbyListener = null; }
   lobbyListener = subscribeLobby(state.activeLobbyCode, snap => {
-    if (!snap.exists()) { showToast('Lobby closed.'); leaveLobby(); return; }
+    if (!snap.exists()) {
+      if (_hasReceivedValidSnapshot) { showToast('Lobby closed.'); leaveLobby(); }
+      return;
+    }
+    _hasReceivedValidSnapshot = true;
     const data = snap.val();
     state.lastLobbyData = data;
     const players = data.players || {};
-    state.lastKnownPlayers = {};
+    console.log('subscription fired, players:', JSON.stringify(players));
+    if (!Object.keys(players).length) {
+      console.log('subscription got empty players, lastKnownPlayers:', JSON.stringify(state.lastKnownPlayers));
+      return;
+    }
+    // Merge incoming players with existing state, preserving local data for missing fields
+    // Start with existing players, then merge incoming on top
+    const incoming = {};
     let stillInLobby = false;
     Object.entries(players).forEach(([id, p]) => {
-      state.lastKnownPlayers[id] = { name:p.name, colorHex:p.colorHex, avatar:p.avatar||null, vote:p.vote||null, voteMeta:p.voteMeta||null, isHost:p.isHost||false, inGame:p.inGame||false };
+      const existing = state.lastKnownPlayers[id] || {};
+      incoming[id] = {
+        name:     p.name     || existing.name     || '',
+        colorHex: p.colorHex || existing.colorHex || '#888888',
+        avatar:   p.avatar   !== undefined ? p.avatar   : (existing.avatar   || null),
+        vote:     p.vote     || null,
+        voteMeta: p.voteMeta || null,
+        isHost:   p.isHost !== undefined ? p.isHost : (existing.isHost || false),
+        inGame:   p.inGame !== undefined ? p.inGame : (existing.inGame || false),
+      };
       if (id === state.myPlayerId) {
         state.isHost = p.isHost || false;
         stillInLobby = true;
         if (p.vote) { state.myVote = p.vote; state.myVoteMeta = p.voteMeta || { size:'standard', diff:'medium' }; setIdentityLocked(true); }
-        else { state.myVote = null; setIdentityLocked(false); }
+        else { state.myVote = null; state.myVoteMeta = null; lobbySize = null; lobbyDiff = null; document.querySelectorAll('.lobby-size-btn,.lobby-diff-btn').forEach(b => b.classList.remove('active')); setIdentityLocked(false); }
       }
     });
+       // Preserve inGame=false for the returning player so host knows they're back
+      if (sessionStorage.getItem('returningFromGame') === '1' && state.myPlayerId && incoming[state.myPlayerId]) {
+        incoming[state.myPlayerId].inGame = false;
+      }
+      state.lastKnownPlayers = incoming;
 
     // Kicked detection
     if (stillInLobby) state._seenInLobby = true;
@@ -680,13 +1172,39 @@ function subscribeLobbyFB() {
       return;
     }
 
+    // Tiebreaker roulette for non-hosts
+    if (data.rouletteActive === true && !state.isHost && !window._rouletteShown) {
+      window._rouletteShown = true;
+      const winnerKey = data.rouletteWinnerKey || null;
+      const opts = data.rouletteOptions;
+      if (opts && Array.isArray(opts) && opts.length > 1) {
+        const rouletteOptions = opts.map(o => ({ key: o.key, meta: { size: o.size, diff: o.diff } }));
+        showTiebreakerRoulette(rouletteOptions, true, winnerKey);
+      }
+    }
+    if (data.rouletteActive === false) {
+      window._rouletteShown = false;
+      // Remove overlay if still showing — redirect will happen on next snapshot
+      const existingOverlay = document.getElementById('roulette-overlay');
+      if (existingOverlay) existingOverlay.remove();
+    }
+
     // Game started — redirect to game.html
     if (data.status === 'started' && data.puzzleDateKey) {
       const gameIsEnded = data.gameSettings?.gameEnded === true;
-      const anyoneInGame = Object.values(players).some(p => p?.inGame);
-      if (!gameIsEnded && anyoneInGame && !state.isHost) {
+      const returningFromGame = sessionStorage.getItem('returningFromGame') === '1';
+      if (returningFromGame) {
+        // Clear once, then stay in lobby for all future snapshots this session
+        sessionStorage.removeItem('returningFromGame');
+        state._suppressGameRedirect = true;
+      }
+      if (!gameIsEnded && !state.isHost && !returningFromGame && !state._suppressGameRedirect) {
+        // Always use pendingPuzzleDateKey — it's written before startLobbyGame so it's always present
+        const puzzleKey = data.pendingPuzzleDateKey || data.puzzleDateKey;
+        console.log('[REDIRECT] pendingPuzzleDateKey:', data.pendingPuzzleDateKey, '| puzzleDateKey:', data.puzzleDateKey, '| using:', puzzleKey);
+        if (!puzzleKey) return; // Wait for next snapshot when key is available
         sessionStorage.setItem('gameMode', data.gameMode || 'together');
-        sessionStorage.setItem('puzzleDateKey', data.puzzleDateKey);
+        sessionStorage.setItem('puzzleDateKey', puzzleKey);
         window.location.href = 'game.html';
         return;
       }
@@ -745,7 +1263,11 @@ function subscribeLobbyFB() {
 function subscribeChatFB() {
   if (chatListener) { chatListener(); chatListener = null; }
   chatListener = subscribeChat(state.activeLobbyCode, snap => {
-    renderChat(snap.val() || {});
+    const msgs = snap.val() || {};
+    // Force re-render by clearing the count cache
+    const container = document.getElementById('chat-messages');
+    if (container) container.dataset.count = '0';
+    renderChat(msgs);
   });
 }
 
@@ -841,8 +1363,12 @@ function init() {
   document.getElementById('start-anyway-confirm')?.addEventListener('click', doStartGame);
   document.getElementById('start-anyway-cancel')?.addEventListener('click', () => closeOverlay('start-anyway-overlay'));
 
-  document.getElementById('mode-card-together')?.addEventListener('click', () => setLobbyMode('together'));
-  document.getElementById('mode-card-versus')?.addEventListener('click', () => setLobbyMode('versus'));
+  document.getElementById('mode-card-together')?.addEventListener('click', () => {
+    if (state.lobbyMode === 'together') setLobbyMode(null); else setLobbyMode('together');
+  });
+  document.getElementById('mode-card-versus')?.addEventListener('click', () => {
+    if (state.lobbyMode === 'versus') setLobbyMode(null); else setLobbyMode('versus');
+  });
 
   document.querySelectorAll('.lobby-size-btn').forEach(b => b.addEventListener('click', () => setLobbySize(b.dataset.size)));
   document.querySelectorAll('.lobby-diff-btn').forEach(b => b.addEventListener('click', () => setLobbyDiff(b.dataset.diff)));
@@ -879,5 +1405,6 @@ window.openSettings          = openSettings;
 window.saveSettings          = saveSettings;
 window.ctxAction             = ctxAction;
 window.closeOverlay          = closeOverlay;
+window.showTiebreakerRoulette = showTiebreakerRoulette;
 
 waitAndInit();

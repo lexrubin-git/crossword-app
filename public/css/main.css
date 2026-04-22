@@ -23,6 +23,7 @@ body {
   color: var(--text);
   min-height: 100vh;
   transition: background .2s, color .2s;
+  zoom: 1.06;
 }
 
 @keyframes logoPulse {
@@ -271,10 +272,10 @@ body {
 
 /* ── Filter chips ── */
 .filter-chip {
-  padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 500;
+  padding: 5px 12px; border-radius: 6px; font-size: 11px; font-weight: 500;
   font-family: Inter, system-ui, sans-serif; cursor: pointer; border: 1px solid var(--border2);
   background: var(--input-bg); color: var(--text2); transition: all .15s;
   letter-spacing: .03em;
 }
-.filter-chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.filter-chip.active { background: rgba(212,160,23,0.06); color: #d4a017; border-color: rgba(212,160,23,0.7);}
 .filter-chip:hover:not(.active) { background: var(--btn-ghost-hover); color: var(--text); }

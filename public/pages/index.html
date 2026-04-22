@@ -182,8 +182,8 @@
     </div>
 
     <div style="display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:260px;margin-bottom:40px">
-      <button class="btn-primary" id="btn-create-lobby" style="width:100%;padding:14px 22px;font-size:14px;">Create lobby →</button>
-      <button class="btn-ghost" id="btn-join-lobby" style="width:100%;padding:12px 22px;font-size:14px;justify-content:center;">Join lobby</button>
+    <button type="button" class="btn-primary" id="btn-create-lobby" style="width:100%;padding:14px 22px;font-size:14px;">Create lobby →</button>
+<button type="button" class="btn-ghost" id="btn-join-lobby" style="width:100%;padding:12px 22px;font-size:14px;justify-content:center;">Join lobby</button>
     </div>
 
     <div style="display:flex;align-items:center;gap:10px">
@@ -204,7 +204,8 @@
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
   import { getDatabase, ref, set, get, update, remove, push, onValue, onChildAdded, onChildChanged, serverTimestamp, onDisconnect } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
-  const app = initializeApp({
+  import { getApps } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  const app = getApps().length ? getApps()[0] : initializeApp({
     apiKey: "AIzaSyBBPKt8u3hkRkFZ0kFurQ6tmEDJQlWNDhw",
     authDomain: "crosswordlex.firebaseapp.com",
     databaseURL: "https://crosswordlex-default-rtdb.firebaseio.com",

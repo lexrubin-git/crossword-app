@@ -72,6 +72,7 @@ export function clearPixelCanvas() {
   pushUndo();
   vectorPaths = [];
   currentPath = null;
+  _bgImage = null;
   drawVectorCanvas();
   updateAvatarPreview();
 }
@@ -233,6 +234,7 @@ export function drawVectorCanvas() {
   ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  if (_bgImage) ctx.drawImage(_bgImage, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
   [...vectorPaths, ...(currentPath ? [currentPath] : [])].forEach(path => {
     if (path.points.length < 2) return;
     ctx.save();
@@ -319,12 +321,24 @@ export function updateAvatarPreview() {
 
 // ── Bake canvas to PNG data URL ──
 export function bakeAvatarDataUrl() {
-  if (!vectorPaths || vectorPaths.length === 0) return null;
+  if (!vectorPaths || vectorPaths.length === 0) {
+    if (_bgImage) {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = offscreen.height = CANVAS_SIZE;
+      const ctx = offscreen.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      ctx.drawImage(_bgImage, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      return offscreen.toDataURL();
+    }
+    return null;
+  }
   const offscreen = document.createElement('canvas');
   offscreen.width = offscreen.height = CANVAS_SIZE;
   const ctx = offscreen.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+  if (_bgImage) ctx.drawImage(_bgImage, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
   vectorPaths.forEach(path => {
     if (path.points.length < 2) return;
     ctx.save();
@@ -343,7 +357,9 @@ export function bakeAvatarDataUrl() {
 }
 
 // ── Mount shared canvas block into a slot ──
-export function mountDrawBlock(slotId) {
+let _bgImage = null;
+
+export function mountDrawBlock(slotId, existingDataUrl = null) {
   const block = document.getElementById('pixel-draw-block');
   const slot  = document.getElementById(slotId);
   if (block && slot) {
@@ -351,8 +367,22 @@ export function mountDrawBlock(slotId) {
     slot.appendChild(block);
   }
   initPixelPalette();
-  drawVectorCanvas();
-  updateUndoRedoBtns();
+  if (existingDataUrl) {
+    const img = new Image();
+    img.onload = () => {
+      _bgImage = img;
+      vectorPaths = [];
+      undoStack = [];
+      redoStack = [];
+      drawVectorCanvas();
+      updateUndoRedoBtns();
+    };
+    img.src = existingDataUrl;
+  } else {
+    _bgImage = null;
+    drawVectorCanvas();
+    updateUndoRedoBtns();
+  }
 
   const canvas = document.getElementById('pixel-canvas');
   const cur    = document.getElementById('pixel-cursor');

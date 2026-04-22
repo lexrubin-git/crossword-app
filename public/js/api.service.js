@@ -1,4 +1,5 @@
 // ── api.service.js — All Firebase + REST API interactions ──
+console.log('api.service.js loaded - version 2');
 // Controllers call these; nothing here touches the DOM.
 
 import { state, showToast } from './state.js';
@@ -15,6 +16,7 @@ function fb() {
 // ══════════════════════════════════════════════
 
 export async function createLobby(playerName, playerColor, pixelAvatarData) {
+  console.log('createLobby called with:', playerName, playerColor?.hex);
   const { db, ref, set, push, onDisconnect, serverTimestamp } = fb();
   const SAFE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
@@ -23,28 +25,34 @@ export async function createLobby(playerName, playerColor, pixelAvatarData) {
   const newRef = push(ref(db, `lobbies/${code}/players`));
   const playerId = newRef.key;
 
-  await set(ref(db, `lobbies/${code}`), {
-    host: playerId,
-    createdAt: serverTimestamp(),
-    status: 'waiting',
-    players: {
-      [playerId]: {
-        name: playerName,
-        colorHex: playerColor.hex,
-        avatar: pixelAvatarData || null,
-        vote: null,
-        voteMeta: null,
-        isHost: true,
-        joinedAt: serverTimestamp(),
+  try {
+    await set(ref(db, `lobbies/${code}`), {
+      host: playerId,
+      createdAt: serverTimestamp(),
+      status: 'waiting',
+      players: {
+        [playerId]: {
+          name: playerName,
+          colorHex: playerColor.hex,
+          avatar: pixelAvatarData || null,
+          vote: null,
+          voteMeta: null,
+          isHost: true,
+          joinedAt: serverTimestamp(),
+        }
       }
-    }
-  });
+    });
+    console.log('createLobby set() succeeded:', { code, playerId, name: playerName, colorHex: playerColor.hex });
+  } catch (err) {
+    console.error('createLobby set() FAILED:', err);
+    throw err;
+  }
 
-  onDisconnect(ref(db, `lobbies/${code}/players/${playerId}`)).remove();
   return { code, playerId };
 }
 
 export async function joinLobby(code, playerName, playerColor, pixelAvatarData) {
+  console.log('joinLobby called with:', code, playerName, playerColor?.hex);
   const { db, ref, get, set, push, onDisconnect, serverTimestamp } = fb();
 
   // Verify lobby exists
@@ -60,16 +68,21 @@ export async function joinLobby(code, playerName, playerColor, pixelAvatarData) 
 
   const newRef = push(ref(db, `lobbies/${code}/players`));
   const playerId = newRef.key;
-  await set(newRef, {
-    name: playerName,
-    colorHex: playerColor.hex,
-    avatar: pixelAvatarData || null,
-    vote: null,
-    isHost: false,
-    joinedAt: serverTimestamp(),
-  });
+  try {
+    await set(newRef, {
+      name: playerName,
+      colorHex: playerColor.hex,
+      avatar: pixelAvatarData || null,
+      vote: null,
+      isHost: false,
+      joinedAt: serverTimestamp(),
+    });
+    console.log('set() succeeded for player:', playerId);
+  } catch (err) {
+    console.error('set() FAILED:', err);
+  }
 
-  onDisconnect(ref(db, `lobbies/${code}/players/${playerId}`)).remove();
+  console.log('joinLobby wrote player:', playerId, { name: playerName, colorHex: playerColor.hex });
   return { playerId };
 }
 
@@ -127,6 +140,7 @@ export async function startLobbyGame(code, puzzleDateKey, gameMode) {
   await update(ref(db, `lobbies/${code}`), {
     status: 'started',
     puzzleDateKey,
+    pendingPuzzleDateKey: null,
     startedAt: serverTimestamp(),
     gameMode,
   });
@@ -219,6 +233,7 @@ export function startGameChatListener(code, callback) {
 export function clearGameGridFB(code) {
   const { db, ref, remove } = fb();
   remove(ref(db, `lobbies/${code}/gameGrid`)).catch(() => {});
+  remove(ref(db, `lobbies/${code}/versusPlayerGrids`)).catch(() => {});
   remove(ref(db, `lobbies/${code}/scores`)).catch(() => {});
   remove(ref(db, `lobbies/${code}/gameChat`)).catch(() => {});
   remove(ref(db, `lobbies/${code}/gameSettings`)).catch(() => {});
@@ -259,6 +274,26 @@ export function removeVersusGridFromFB(code, playerId) {
 export function startVersusGridListener(code, callback) {
   const { db, ref, onValue } = fb();
   return onValue(ref(db, `lobbies/${code}/versusGrids`), callback);
+}
+
+// Versus player grid (private per-player storage)
+export function pushVersusPlayerCellToFB(code, playerId, row, col, letter, filledBy, filledColor, revealed = false) {
+  const { db, ref, update } = fb();
+  const key = `${row}_${col}`;
+  update(ref(db, `lobbies/${code}/versusPlayerGrids/${playerId}/${key}`), {
+    letter, filledBy, filledColor, revealed, ts: Date.now()
+  }).catch(() => {});
+}
+
+export async function fetchVersusPlayerGrid(code, playerId) {
+  const { db, ref, get } = fb();
+  const snap = await get(ref(db, `lobbies/${code}/versusPlayerGrids/${playerId}`));
+  return snap.exists() ? snap : null;
+}
+
+export function clearVersusPlayerGrid(code, playerId) {
+  const { db, ref, remove } = fb();
+  remove(ref(db, `lobbies/${code}/versusPlayerGrids/${playerId}`)).catch(() => {});
 }
 
 // Mark player in-game

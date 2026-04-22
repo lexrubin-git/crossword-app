@@ -4,7 +4,7 @@
  * is protected by Firebase Security Rules, not the API key.
  */
 
-import { initializeApp }
+import { initializeApp, getApps }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 
 import {
@@ -32,23 +32,24 @@ const firebaseConfig = {
   appId:             "1:1005145578019:web:588bb7573d14b15455af96"
 };
 
-const app = initializeApp(firebaseConfig);
-const db  = getDatabase(app);
-
-window._fb = {
-  db,
-  ref,
-  set,
-  get,
-  update,
-  remove,
-  push,
-  onValue,
-  onChildAdded,
-  onChildChanged,
-  serverTimestamp,
-  onDisconnect,
-};
+window._fb = window._fb || (() => {
+  const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+  return {
+    db,
+    ref,
+    set,
+    get,
+    update,
+    remove,
+    push,
+    onValue,
+    onChildAdded,
+    onChildChanged,
+    serverTimestamp,
+    onDisconnect,
+  };
+})();
 
 console.log('✓ Firebase connected');
 window.dispatchEvent(new Event('firebase-ready'));

@@ -39,14 +39,16 @@
 .identity-swatches .swatch.selected::after { inset: 3px; border-width: 1.5px; }
 
 /* ── Player list ── */
-.player-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.player-list { display: flex; flex-direction: column; gap: 8px; margin-top: 1px; }
 .player-row {
   display: flex; align-items: center; gap: 10px;
   background: var(--player-row-bg); border: 0.5px solid var(--border); border-radius: 10px;
   padding: 10px 14px; font-size: 13px; color: var(--text);
+  min-height: 40px;
 }
 .player-row.is-me {
-  border: 2px solid rgba(255, 255, 255, 0.85) !important;
+  border: 1.9px solid rgba(180, 180, 180, 0.7) !important;
+
 }
 
 .player-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
@@ -56,21 +58,15 @@
   border: 0.5px solid var(--border);
   flex-shrink: 0;
 }
-.player-badge.host {
-  background: #ffffff !important;
-  color: #111111 !important;
-  border: 1.5px solid #ffffff !important;
-  border-radius: 6px !important;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 10px;
-  letter-spacing: 0.03em;
-  margin-left: auto;
+ .player-badge.host {
+  background: rgba(112, 10, 3, 0.562);
+  color: hsl(0, 80%, 46%);
+  border-color: rgba(212, 29, 23, 0.644);
 }
 .player-badge.in-game { background: rgba(212,160,23,0.18); color: #d4a017; border-color: rgba(212,160,23,0.4); }
 
 .player-dots-btn {
-  width: 24px; height: 24px; border-radius: 6px; border: none;
+  width: 16px; height: 16px; border-radius: 4px; border: none;
   background: transparent; color: var(--text3); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: background .12s, color .12s; flex-shrink: 0; padding: 0;

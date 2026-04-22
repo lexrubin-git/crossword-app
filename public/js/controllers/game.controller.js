@@ -8,6 +8,7 @@ import {
   sendGameChatFB, startGameChatListener,
   startCursorListener, pushCursorToFB, removeCursorFromFB, setupCursorDisconnect,
   pushVersusGridToFB, removeVersusGridFromFB, startVersusGridListener,
+  pushVersusPlayerCellToFB, fetchVersusPlayerGrid, clearVersusPlayerGrid,
   setPlayerInGame, clearGameGridFB,
   transferHost, removePlayer, updatePlayer,
 } from '../api.service.js';
@@ -191,7 +192,6 @@ function enterGame(map, gameMode) {
       if (codeEl) codeEl.textContent = state.activeLobbyCode || '—';
 
       if (window._gameMode === 'versus') {
-        window._snapshotLoaded = true;
         autocheckEnabled = true;
         updateAutocheckPill(true);
         // Hide check/reveal in versus
@@ -204,6 +204,12 @@ function enterGame(map, gameMode) {
           const s = snap.val() || {};
           applyGameSettings(s);
         });
+        // Restore this player's own versus grid from private path
+        fetchVersusPlayerGrid(state.activeLobbyCode, state.myPlayerId).then(snap => {
+          if (snap) applyFullGridSnapshot(snap);
+          window._snapshotLoaded = true;
+          pushVersusGridState();
+        }).catch(() => { window._snapshotLoaded = true; });
         startVersusGridPreview();
       } else {
         // Restore check/reveal
@@ -211,10 +217,10 @@ function enterGame(map, gameMode) {
           .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = ''; });
         startCursorTracking();
         if (_stopCellSync) { _stopCellSync(); _stopCellSync = null; }
-        _stopCellSync = startCellSyncListener(state.activeLobbyCode, applySnap, applySnap);
         fetchGridSnapshotFB(state.activeLobbyCode).then(snap => {
           if (snap) applyFullGridSnapshot(snap);
           window._snapshotLoaded = true;
+          _stopCellSync = startCellSyncListener(state.activeLobbyCode, applySnap, applySnap);
           if (_stopGameSettings) { _stopGameSettings(); _stopGameSettings = null; }
           _stopGameSettings = startGameSettingsListener(state.activeLobbyCode, s => applyGameSettings(s.val() || {}));
           if (state.isHost) window._snapshotLoaded = true;
@@ -277,7 +283,11 @@ function enterGame(map, gameMode) {
   if (_stopCellSync)     { _stopCellSync();     _stopCellSync     = null; }
   if (_stopGameSettings) { _stopGameSettings(); _stopGameSettings = null; }
 
-  if (state.isHost && !window._isRejoin) {
+  const _returningFromGame = sessionStorage.getItem('returningFromGame') === '1';
+  sessionStorage.removeItem('returningFromGame');
+  const _freshStart = sessionStorage.getItem('freshGameStart') === '1';
+  sessionStorage.removeItem('freshGameStart');
+  if (state.isHost && !window._isRejoin && !_returningFromGame && _freshStart) {
     clearGameGridFB(state.activeLobbyCode);
     pushGameSettingFB(state.activeLobbyCode, 'chatGuessMode', false);
     pushGameSettingFB(state.activeLobbyCode, 'chatGuessHard', false);
@@ -299,6 +309,15 @@ function enterGame(map, gameMode) {
 
   _stopPlayerInfo = startPlayerInfoListener(state.activeLobbyCode, snap => {
     const players = snap.val() || {};
+
+    // FIX: kicked detection — if we're no longer in the players list, redirect
+    if (state.myPlayerId && !players[state.myPlayerId] && !state.isHost) {
+      stopAllListeners();
+      showToast('You were kicked from the game.');
+      setTimeout(() => { window.location.href = 'index.html'; }, 1200);
+      return;
+    }
+
     Object.entries(players).forEach(([id, p]) => {
       if (!p) return;
       if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
@@ -355,6 +374,34 @@ function enterGame(map, gameMode) {
         if (toolbar) toolbar.style.display = 'flex';
         const nhIndicator = document.getElementById('nonhost-mode-indicator');
         if (nhIndicator) nhIndicator.style.display = 'none';
+      }
+    }
+    // Live-update versus preview grid player info
+    if (window._gameMode === 'versus') {
+      const wrap = document.getElementById('versus-previews-wrap');
+      if (wrap) {
+        Object.entries(players).forEach(([id, p]) => {
+          if (id === state.myPlayerId || !p) return;
+          const colorHex = state.lastKnownPlayers[id]?.colorHex || '#888';
+          const name = state.lastKnownPlayers[id]?.name || 'Player';
+          const avatarData = state.lastKnownPlayers[id]?.avatar || null;
+          wrap.querySelectorAll('.versus-preview-player').forEach(playerDiv => {
+            const nameEl = playerDiv.querySelector('div[style*="text-align:center"]');
+            const avatarEl = playerDiv.querySelector('div[style*="border-radius:50%"]');
+            if (!nameEl || !avatarEl) return;
+            nameEl.style.color = colorHex;
+            nameEl.textContent = name;
+            avatarEl.style.backgroundColor = colorHex;
+            avatarEl.style.borderColor = colorHex;
+            if (avatarData) {
+              avatarEl.style.backgroundImage = `url(${avatarData})`;
+              avatarEl.textContent = '';
+            } else {
+              avatarEl.style.backgroundImage = '';
+              avatarEl.textContent = (name || '?').charAt(0).toUpperCase();
+            }
+          });
+        });
       }
     }
     renderGameScores();
@@ -633,7 +680,13 @@ function typeLetter(letter) {
   if (letterEl) { letterEl.textContent=letter; letterEl.style.color=state.playerColor.hex; }
   if (cellEl) cellEl.classList.add('has-letter');
   if (autocheckEnabled) recomputeScores();
-  if (state.activeLobbyCode) pushCellToFB(state.activeLobbyCode, row, col, letter, state.myPlayerId, state.playerColor.hex);
+  if (state.activeLobbyCode) {
+    if (window._gameMode==='versus') {
+      pushVersusPlayerCellToFB(state.activeLobbyCode, state.myPlayerId, row, col, letter, state.myPlayerId, state.playerColor.hex);
+    } else {
+      pushCellToFB(state.activeLobbyCode, row, col, letter, state.myPlayerId, state.playerColor.hex);
+    }
+  }
   if (window._gameMode==='versus' && state.activeLobbyCode) pushVersusGridState();
   advanceInWordAlways();
   autocheckCell(row,col);
@@ -666,7 +719,13 @@ function eraseLetter() {
     const letterEl=document.getElementById(`cell-letter-${row}-${col}`);
     if (letterEl) { letterEl.textContent=''; letterEl.style.color=''; }
     if (cellEl) cellEl.classList.remove('has-letter','wrong');
-    if (state.activeLobbyCode) pushCellToFB(state.activeLobbyCode,row,col,'',null,null);
+    if (state.activeLobbyCode) {
+      if (window._gameMode==='versus') {
+        pushVersusPlayerCellToFB(state.activeLobbyCode, state.myPlayerId, row, col, '', null, null);
+      } else {
+        pushCellToFB(state.activeLobbyCode,row,col,'',null,null);
+      }
+    }
     if (window._gameMode==='versus') pushVersusGridState();
   } else {
     if (selectedWord) { const cells=selectedWord.cells; const idx=cells.findIndex(c=>c.row===row&&c.col===col); if (idx>0) { selectedCell=cells[idx-1]; updateGridHighlight(); } }
@@ -689,6 +748,7 @@ function applyFullGridSnapshot(snap) {
     if (!val||!key||!val.letter) return;
     const [r,c]=key.split('_').map(Number);
     if (!gameGrid[r]||!gameGrid[r][c]||gameGrid[r][c].isBlack) return;
+    
     const revealed=!!(val.filledBy==='revealed'||val.revealed);
     gameGrid[r][c].letter=val.letter||'';
     gameGrid[r][c].filledBy=val.filledBy||'';
@@ -826,7 +886,8 @@ function renderGameScores() {
     const avatarStyle=displayP.avatar?`background-image:url(${displayP.avatar});background-color:${displayP.colorHex}`:`background-color:${displayP.colorHex}`;
     const initial=(displayP.name||'?').charAt(0).toUpperCase();
     const displayScore=(autocheckEnabled||chatGuessMode)?score:'—';
-    const hostTag=state.lastKnownPlayers[id]?.isHost?'<span style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--text);color:var(--bg);padding:1px 5px;border-radius:4px;vertical-align:middle">host</span>':'';
+    // FIX 6: host tag next to score, not name
+    const hostTag=state.lastKnownPlayers[id]?.isHost?'<span class="player-badge host" style="margin-left:6px">host</span>':'';
     row.innerHTML=`
       <div class="game-score-avatar" style="${avatarStyle};cursor:pointer" data-avatar="${(displayP.avatar||'').replace(/"/g,'&quot;')}" data-color="${displayP.colorHex}" data-name="${(displayP.name||'Player').replace(/"/g,'&quot;')}" data-initial="${initial}">${displayP.avatar?'':initial}</div>
       <div class="game-score-name">${displayP.name||'Player'}${hostTag}</div>
@@ -1142,8 +1203,10 @@ function renderGameChatMessages(list) {
   if (empty) empty.style.display=list.length?'none':'';
   Array.from(container.children).forEach(ch=>{ if (ch.id!=='game-chat-empty') ch.remove(); });
   list.forEach(m=>{
-    if (window._gameMode==='versus'&&state.isHost&&m.isGuess&&(m.filledBy||m.playerId)!==state.myPlayerId) return;
-    if (m.isGuess&&m.guessResult==='correct'&&m.filledBy!==state.myPlayerId) {
+    // FIX 3/4: in versus mode, hide other players' guesses from everyone
+    if (window._gameMode==='versus'&&m.isGuess&&(m.filledBy||m.playerId)!==state.myPlayerId) return;
+    // FIX 3/4: in versus mode, don't apply other players' correct guesses to this player's board
+    if (m.isGuess&&m.guessResult==='correct'&&m.filledBy!==state.myPlayerId&&window._gameMode!=='versus') {
       const parsed=parsePrefixedGuess(m.text||'');
       if (parsed) {
         const word=gameWords.find(w=>w.num===parsed.num&&w.dir===parsed.dir);
@@ -1244,7 +1307,7 @@ function stopCursorTracking() {
 
 // ── Versus grid preview ──
 function pushVersusGridState() {
-  if (!state.activeLobbyCode||!state.myPlayerId||window._gameMode!=='versus') return;
+  if (!state.activeLobbyCode||!state.myPlayerId||window._gameMode!=='versus'||!gameGrid||!currentMap) return;
   if (_versusGridPushTimer) clearTimeout(_versusGridPushTimer);
   _versusGridPushTimer=setTimeout(()=>{
     if (!gameGrid||!currentMap) return;
@@ -1283,24 +1346,38 @@ function startVersusGridPreview() {
       const maxWidth=130, cellPx=Math.max(2,Math.floor(maxWidth/size)), totalPx=cellPx*size;
       const playerDiv=document.createElement('div');
       playerDiv.className='versus-preview-player';
+      playerDiv.style.cssText=`background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:8px;box-sizing:border-box;overflow:hidden;`;
       const miniGrid=document.createElement('div');
       miniGrid.className='versus-mini-grid';
-      miniGrid.style.cssText=`grid-template-columns:repeat(${size},${cellPx}px);grid-template-rows:repeat(${size},${cellPx}px);width:${totalPx}px;height:${totalPx}px`;
+      miniGrid.style.cssText=`display:grid;grid-template-columns:repeat(${size},${cellPx}px);grid-template-rows:repeat(${size},${cellPx}px);width:${totalPx}px;height:${totalPx}px;flex-shrink:0;border:1px solid #333;border-radius:3px;overflow:hidden;`;
       grid.cells.forEach(v=>{
         const cell=document.createElement('div');
-        let stateClass;
-        if (v===0) stateClass='black';
-        else if (v===1) stateClass='';
-        else if (v===3) stateClass=autocheckEnabled?'correct':'filled';
-        else stateClass='filled';
-        cell.className='versus-mini-cell'+(stateClass?' '+stateClass:'');
-        cell.style.width=cellPx+'px'; cell.style.height=cellPx+'px';
+        cell.style.width=cellPx+'px';
+        cell.style.height=cellPx+'px';
+        cell.style.boxSizing='border-box';
+        if (v===0) {
+          cell.style.background='#1a1a1a';
+          cell.style.border='none';
+        } else if (v===3) {
+          cell.style.background=autocheckEnabled?'#27ae60':'#666666';
+          cell.style.border='0.5px solid #555';
+        } else if (v===2) {
+          cell.style.background='#666666';
+          cell.style.border='0.5px solid #555';
+        } else {
+          cell.style.background='#ffffff';
+          cell.style.border='0.5px solid #c0c0c0';
+        }
         miniGrid.appendChild(cell);
       });
+      const avatar=document.createElement('div');
+      const avatarData=state.lastKnownPlayers[id]?.avatar||null;
+      avatar.style.cssText=`width:28px;height:28px;border-radius:50%;flex-shrink:0;background-color:${colorHex};background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;border:2px solid ${colorHex};`;
+      if(avatarData){avatar.style.backgroundImage=`url(${avatarData})`;} else {avatar.textContent=(name||'?').charAt(0).toUpperCase();}
       const nameDiv=document.createElement('div');
-      nameDiv.className='versus-preview-name';
-      nameDiv.style.color=colorHex; nameDiv.textContent=name;
-      playerDiv.appendChild(miniGrid); playerDiv.appendChild(nameDiv);
+      nameDiv.style.cssText=`color:${colorHex};font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;text-align:center;max-width:${totalPx+20}px;`;
+      nameDiv.textContent=name;
+      playerDiv.appendChild(avatar); playerDiv.appendChild(miniGrid); playerDiv.appendChild(nameDiv);
       wrap.appendChild(playerDiv);
     });
     if (!anyOther) {
@@ -1311,7 +1388,8 @@ function startVersusGridPreview() {
     }
     wrap.style.display='';
   });
-  pushVersusGridState();
+  setTimeout(() => pushVersusGridState(), 500);
+  setInterval(() => { if (window._gameMode === 'versus') pushVersusGridState(); }, 500);
 }
 
 function stopVersusGridPreview() {
@@ -1418,14 +1496,14 @@ function doLeaveGame() {
   window.location.href='index.html';
 }
 
-function playAgain() {
+async function playAgain() {
   stopAllListeners();
   window._joiningGame=false; window._gameMode='together';
   closeOverlay('game-over-overlay');
   if (state.activeLobbyCode&&state.myPlayerId&&window._fb) {
-    const {update,ref,db,remove}=window._fb;
-    update(ref(db,`lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`),{inGame:false}).catch(()=>{});
-    if (state.isHost) update(ref(db,`lobbies/${state.activeLobbyCode}`),{status:'waiting'}).catch(()=>{});
+    const {update,ref,db}=window._fb;
+    try { await update(ref(db,`lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`),{inGame:false}); } catch {}
+    if (state.isHost) { try { await update(ref(db,`lobbies/${state.activeLobbyCode}`),{status:'waiting'}); } catch {} }
   }
   if (typeof window.removeVote==='function') window.removeVote();
   window.location.href='lobby.html';
@@ -1437,15 +1515,16 @@ function goBackToLobby() {
   doGoBackToLobby();
 }
 
-function doGoBackToLobby() {
+async function doGoBackToLobby() {
   closeOverlay('back-to-lobby-confirm-overlay');
   stopAllListeners();
   window._joiningGame=false; window._gameMode='together';
   closeOverlay('game-over-overlay');
   if (state.activeLobbyCode&&state.myPlayerId&&window._fb) {
     const {update,ref,db}=window._fb;
-    update(ref(db,`lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`),{inGame:false}).catch(()=>{});
+    try { await update(ref(db,`lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`),{inGame:false}); } catch {}
   }
+  sessionStorage.setItem('returningFromGame', '1');
   window.location.href='lobby.html';
 }
 
@@ -1601,18 +1680,39 @@ function doForfeit() {
 // ── Init ──
 function init() {
   // Load puzzle from sessionStorage (set by lobby or home controller)
-  const puzzleJson = sessionStorage.getItem('soloPuzzle');
-  const gameMode   = sessionStorage.getItem('gameMode') || 'together';
+console.log('[GAME INIT] dateKey from sessionStorage:', sessionStorage.getItem('puzzleDateKey'), 'isHost:', state.isHost);
+const gameMode   = sessionStorage.getItem('gameMode') || 'together';
+const puzzleJson = gameMode === 'versus' ? null : sessionStorage.getItem('soloPuzzle');
 
-  if (!puzzleJson) {
+if (!puzzleJson) {
     // Multiplayer: fetch puzzle from Firebase startedAt key
     const dateKey = sessionStorage.getItem('puzzleDateKey');
     if (!dateKey || !state.activeLobbyCode) {
       window.location.href = state.activeLobbyCode ? 'lobby.html' : 'index.html';
       return;
     }
-    fetchNytPuzzle(dateKey).then(rawData => {
-      const puzzle = parseNytPuzzle(rawData, dateKey);
+    // Non-hosts: always verify the dateKey against Firebase to avoid stale sessionStorage
+    const verifyDateKey = async () => {
+      if (state.activeLobbyCode && window._fb) {
+        try {
+          const { get, ref, db } = window._fb;
+          const snap = await get(ref(db, `lobbies/${state.activeLobbyCode}`));
+          if (snap.exists()) {
+            const d = snap.val();
+            const fbKey = d.puzzleDateKey || dateKey;
+            console.log('[VERIFY] puzzleDateKey from FB:', fbKey, '| sessionStorage had:', dateKey);
+            return fbKey;
+          }
+        } catch {}
+      }
+      return dateKey;
+    };
+    verifyDateKey().then(resolvedDateKey => {
+      if (resolvedDateKey !== dateKey) sessionStorage.setItem('puzzleDateKey', resolvedDateKey);
+      return fetchNytPuzzle(resolvedDateKey);
+    }).then(rawData => {
+      const dateKeyFinal = sessionStorage.getItem('puzzleDateKey') || dateKey;
+      const puzzle = parseNytPuzzle(rawData, dateKeyFinal);
       enterGame(puzzle, gameMode);
       setupKeyboard();
     }).catch(e => {

@@ -182,6 +182,7 @@ async function doJoin() {
     closeOverlay('join-overlay');
     window.location.href = 'lobby.html';
   } catch (e) {
+    console.error('doJoin error:', e);
     let errMsg = e.message;
     if (errMsg === 'name_taken')   errMsg = 'That name is already taken. Please choose another.';
     if (errMsg === 'color_taken')  errMsg = 'That color was just taken — please pick another.';

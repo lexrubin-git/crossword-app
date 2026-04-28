@@ -19,8 +19,7 @@
 <!-- Autocheck confirm -->
 <div id="autocheck-confirm-overlay" class="hidden">
   <div class="overlay-card" style="max-width:380px;padding:32px 28px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#d4a017" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <div style="margin-bottom:8px">
       <div style="font-size:16px;font-weight:700;color:var(--text)">Enable autocheck?</div>
     </div>
     <p style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:24px">Autocheck will be enabled for <strong>all players</strong>. Correct letters will turn green and incorrect ones red.</p>
@@ -64,8 +63,7 @@
 <!-- Forfeit confirm -->
 <div id="forfeit-confirm-overlay" class="overlay-backdrop hidden" style="z-index:700">
   <div style="background:var(--overlay-bg);border:1px solid var(--border2);border-radius:16px;padding:32px 28px;max-width:360px;width:100%;box-shadow:0 24px 60px rgba(0,0,0,0.5)">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#e05151" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <div style="margin-bottom:8px">
       <div style="font-size:16px;font-weight:700;color:var(--text)">Forfeit the match?</div>
     </div>
     <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:24px">Are you sure you want to forfeit the match for all players? The game will end immediately.</div>
@@ -259,9 +257,8 @@
               <svg id="game-eye-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
               <svg id="game-eye-off-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             </button>
-            <button class="banner-copy" id="game-code-copy-btn">
-              <svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              <span id="game-code-copy-label">Copy link</span>
+            <button class="lobby-code-btn" id="game-code-copy-btn" style="padding:5px 7px" title="Copy link">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
         </div>
@@ -331,7 +328,7 @@
 
 <!-- Game controller -->
 <script type="module">
-  import '../js/controllers/game.controller.js';
+  import '../js/controllers/game.controller.js?v=2';
 </script>
 
 </body>

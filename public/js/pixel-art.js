@@ -255,11 +255,12 @@ function getPoint(e) {
   const canvas = document.getElementById('pixel-canvas');
   if (!canvas) return { x: 0, y: 0 };
   const rect = canvas.getBoundingClientRect();
-  const scaleX = CANVAS_SIZE / rect.width;
-  const scaleY = CANVAS_SIZE / rect.height;
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
   const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-  return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+  return {
+    x: (clientX - rect.left) * (CANVAS_SIZE / rect.width),
+    y: (clientY - rect.top)  * (CANVAS_SIZE / rect.height),
+  };
 }
 
 function startPaint(e) {
@@ -296,7 +297,7 @@ function updateCursor() {
   if (!canvas || !cur) return;
   const rect = canvas.getBoundingClientRect();
   const scaleX = rect.width / CANVAS_SIZE;
-  const screenSize = Math.max(4, (eraserMode ? Math.max(brushSize * 3, 20) : brushSize) * scaleX);
+  const screenSize = Math.max(4, (eraserMode ? Math.max(brushSize * 3, 20) : brushSize) / scaleX);
   cur.style.width  = screenSize + 'px';
   cur.style.height = screenSize + 'px';
 }
@@ -397,7 +398,10 @@ export function mountDrawBlock(slotId, existingDataUrl = null) {
   canvas.onmouseleave = () => { if (cur) cur.style.display = 'none'; endPaint(); updateAvatarPreview(); };
   let _previewRAF = null;
   canvas.onmousemove  = e => {
-    if (cur) { cur.style.left = e.clientX + 'px'; cur.style.top = e.clientY + 'px'; }
+    if (cur) {
+      cur.style.left = e.clientX + 'px';
+      cur.style.top  = e.clientY + 'px';
+    }
     continuePaint(e);
     if (e.buttons && !_previewRAF) {
       _previewRAF = requestAnimationFrame(() => { _previewRAF = null; updateAvatarPreview(); });

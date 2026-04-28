@@ -10,10 +10,11 @@
   touch-action: none;
 }
 #pixel-canvas {
-  cursor: none; border: 1.5px solid var(--border); border-radius: 6px;
+  cursor: none; outline: 1.5px solid var(--border); border-radius: 6px;
   width: 100%; max-width: 560px; height: auto;
   will-change: contents;
   image-rendering: auto;
+  display: block;
 }
 #pixel-cursor {
   position: fixed; pointer-events: none; border-radius: 50%; z-index: 9999;

@@ -102,6 +102,7 @@ function buildWords(map) {
 
 // ── Enter game ──
 function enterGame(map, gameMode) {
+  currentMap = map;
   window._gameMode = gameMode || 'together';
   window._joiningGame = false;
   window._puzzleCompletionAllowed = false;
@@ -112,8 +113,24 @@ function enterGame(map, gameMode) {
 
   document.getElementById('game-over-overlay')?.classList.add('hidden');
 
-  currentMap = map;
-  window.currentMap = map;
+  const mapLabel = document.getElementById('game-map-label');
+  if (mapLabel) {
+    const gridSize = map.cols ? `${map.size}×${map.cols}` : `${map.size}×${map.size}`;
+    const date = map.dateKey ? formatNytDateLabel(map.dateKey) : '';
+    const title = map.title || '';
+    const diffLabel = (() => {
+      if (map.difficulty) return map.difficulty.charAt(0).toUpperCase() + map.difficulty.slice(1);
+      const key = map.dateKey || '';
+      const parts = key.replace(/-/g, '/').split('/');
+      if (parts.length < 3) return '';
+      const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      if (isNaN(d.getTime())) return '';
+      const day = d.getDay();
+      return ['Sunday','Easy','Easy','Medium','Medium','Hard','Hard'][day] || '';
+    })();
+    console.log('[LABEL DEBUG]', { title, date, gridSize, diffLabel, dateKey: map.dateKey, difficulty: map.difficulty });
+    mapLabel.textContent = [gridSize, diffLabel, date].filter(Boolean).join(' · ');
+  }
   const size = map.size;
   const numCols = map.cols || size;
   const blackSet = new Set(map.blacks.map(([r,c]) => r+'_'+c));
@@ -144,6 +161,15 @@ function enterGame(map, gameMode) {
   // Timer
   gameTimerSec = 0;
   clearInterval(gameTimerInterval);
+  const startTimer = () => {
+    clearInterval(gameTimerInterval);
+    gameTimerInterval = setInterval(() => {
+      gameTimerSec++;
+      const m = Math.floor(gameTimerSec/60), s = gameTimerSec%60;
+      const el = document.getElementById('game-timer');
+      if (el) el.textContent = m+':'+(s<10?'0':'')+s;
+    }, 1000);
+  };
   if (state.activeLobbyCode && window._fb) {
     const { get, ref, db } = window._fb;
     get(ref(db, `lobbies/${state.activeLobbyCode}/startedAt`)).then(snap => {
@@ -151,16 +177,21 @@ function enterGame(map, gameMode) {
         const ts = snap.val();
         window._lastGameStartedAt = ts;
         const elapsed = Math.floor((Date.now() - ts) / 1000);
-        if (elapsed > 0) gameTimerSec = elapsed;
+        gameTimerSec = Math.max(0, elapsed);
+      } else {
+        gameTimerSec = 0;
       }
-    }).catch(() => {});
+      startTimer();
+      // Re-sync every 30s to prevent drift
+      window._timerResyncInterval = setInterval(() => {
+        if (window._lastGameStartedAt) {
+          gameTimerSec = Math.max(0, Math.floor((Date.now() - window._lastGameStartedAt) / 1000));
+        }
+      }, 30000);
+    }).catch(() => { gameTimerSec = 0; startTimer(); });
+  } else {
+    startTimer();
   }
-  gameTimerInterval = setInterval(() => {
-    gameTimerSec++;
-    const m = Math.floor(gameTimerSec/60), s = gameTimerSec%60;
-    const el = document.getElementById('game-timer');
-    if (el) el.textContent = m+':'+(s<10?'0':'')+s;
-  }, 1000);
 
   // UI
   selectedCell = null; selectedDir = 'across'; selectedWord = null;
@@ -209,8 +240,11 @@ function enterGame(map, gameMode) {
           if (snap) applyFullGridSnapshot(snap);
           window._snapshotLoaded = true;
           pushVersusGridState();
-        }).catch(() => { window._snapshotLoaded = true; });
+          pushVersusGridState();
+        }).catch(() => { window._snapshotLoaded = true; pushVersusGridState(); });
         startVersusGridPreview();
+        setTimeout(() => pushVersusGridState(), 50);
+        setTimeout(() => pushVersusGridState(), 200);
       } else {
         // Restore check/reveal
         ['host-check-group','host-check-divider','host-reveal-group','host-reveal-divider']
@@ -618,10 +652,10 @@ function setupKeyboard() {
       return;
     }
     if (!selectedCell) return;
-    if (e.key==='ArrowLeft')  { e.preventDefault(); moveCell(0,-1); return; }
-    if (e.key==='ArrowRight') { e.preventDefault(); moveCell(0, 1); return; }
-    if (e.key==='ArrowUp')    { e.preventDefault(); moveCell(-1,0); return; }
-    if (e.key==='ArrowDown')  { e.preventDefault(); moveCell( 1,0); return; }
+    if (e.key==='ArrowLeft')  { e.preventDefault(); return; }
+    if (e.key==='ArrowRight') { e.preventDefault(); return; }
+    if (e.key==='ArrowUp')    { e.preventDefault(); return; }
+    if (e.key==='ArrowDown')  { e.preventDefault(); return; }
     if (e.key==='Backspace'||e.key==='Delete') { e.preventDefault(); eraseLetter(); return; }
     if (/^[a-zA-Z]$/.test(e.key)) {
       e.preventDefault();
@@ -637,19 +671,18 @@ function setupKeyboard() {
 
 function moveCell(dr, dc) {
   if (!selectedCell) return;
-  let {row,col} = selectedCell;
+  const {row, col} = selectedCell;
   const _rows = currentMap.size, _cols = currentMap.cols||currentMap.size;
-  const nr=row+dr, nc=col+dc;
-  if (nr<0||nr>=_rows||nc<0||nc>=_cols||gameGrid[nr][nc].isBlack) return;
-  if (dr!==0) selectedDir='down';
-  if (dc!==0) selectedDir='across';
-  selectedCell={row:nr,col:nc};
-  selectedWord = gameWords.find(w=>w.dir===selectedDir&&w.cells.some(c=>c.row===nr&&c.col===nc))
-    || gameWords.find(w=>w.cells.some(c=>c.row===nr&&c.col===nc)) || null;
+
+  const nr = row + dr, nc = col + dc;
+  if (nr < 0 || nr >= _rows || nc < 0 || nc >= _cols || gameGrid[nr][nc].isBlack) return;
+  selectedCell = {row: nr, col: nc};
+  const newDir = dr !== 0 ? 'down' : 'across';
+  selectedWord = gameWords.find(w => w.dir === newDir && w.cells.some(c => c.row === nr && c.col === nc))
+    || gameWords.find(w => w.cells.some(c => c.row === nr && c.col === nc)) || null;
   if (selectedWord) selectedDir = selectedWord.dir;
   updateGridHighlight(); updateActiveClue(); updateClueList();
 }
-
 function advanceWord(delta) {
   const dir = selectedWord ? selectedWord.dir : selectedDir;
   const sameDir = [...gameWords].filter(w=>w.dir===dir).sort((a,b)=>a.num-b.num);
@@ -972,17 +1005,30 @@ function checkPuzzleComplete() {
   const allDone=gameWords.every(w=>w.cells.every((c,i)=>gameGrid[c.row][c.col].letter===w.answer[i]));
   if (allDone) {
     clearInterval(gameTimerInterval);
+    // Compute authoritative finish time from startedAt so all players agree
+    const authFinishSec = window._lastGameStartedAt
+      ? Math.max(0, Math.floor((Date.now() - window._lastGameStartedAt) / 1000))
+      : gameTimerSec;
+    gameTimerSec = authFinishSec;
     if (window._gameMode==='versus') {
-      const finishSec=gameTimerSec;
       if (window._fb&&state.activeLobbyCode&&state.myPlayerId) {
         const {update,ref,db}=window._fb;
-        update(ref(db,`lobbies/${state.activeLobbyCode}/versusFinish/${state.myPlayerId}`),{finishSec,name:state.playerName,colorHex:state.playerColor.hex,ts:Date.now()}).catch(()=>{});
+        update(ref(db,`lobbies/${state.activeLobbyCode}/versusFinish/${state.myPlayerId}`),{finishSec:authFinishSec,name:state.playerName,colorHex:state.playerColor.hex,ts:Date.now()}).catch(()=>{});
       }
       setTimeout(showGameOver,600);
     } else {
       if (state.isHost) {
         recomputeScores();
-        setTimeout(()=>{ if (state.activeLobbyCode) pushGameSettingFB(state.activeLobbyCode,'gameEnded',true); },200);
+        setTimeout(()=>{
+          if (state.activeLobbyCode) {
+            pushGameSettingFB(state.activeLobbyCode,'gameEnded',true);
+            // Write canonical finish time so non-hosts show the same value
+            if (window._fb) {
+              const {update,ref,db}=window._fb;
+              update(ref(db,`lobbies/${state.activeLobbyCode}/gameSettings`),{finishSec:authFinishSec}).catch(()=>{});
+            }
+          }
+        },200);
       }
       setTimeout(showGameOver,600);
     }
@@ -1010,6 +1056,9 @@ function applyGameSettings(settings) {
     const goOverlay=document.getElementById('game-over-overlay');
     if (goOverlay?.classList.contains('hidden')&&window._puzzleCompletionAllowed&&state.activeLobbyCode) {
       clearInterval(gameTimerInterval);
+      // Use canonical finish time written by host so all players show the same timer
+      if (settings.finishSec != null) gameTimerSec = settings.finishSec;
+      else if (window._lastGameStartedAt) gameTimerSec = Math.max(0, Math.floor((Date.now() - window._lastGameStartedAt) / 1000));
       setTimeout(showGameOver,400);
     }
   }
@@ -1381,13 +1430,15 @@ function startVersusGridPreview() {
       wrap.appendChild(playerDiv);
     });
     if (!anyOther) {
+      const otherPlayers = Object.entries(state.lastKnownPlayers).filter(([id]) => id !== state.myPlayerId);
       const w=document.createElement('div');
       w.style.cssText='font-size:11px;color:var(--text3);letter-spacing:.04em;padding:4px 0;';
-      w.textContent='Waiting for opponents…';
+      w.textContent = otherPlayers.length > 0 ? 'Loading opponent grid…' : 'Waiting for opponents…';
       wrap.appendChild(w);
     }
     wrap.style.display='';
   });
+  setTimeout(() => pushVersusGridState(), 100);
   setTimeout(() => pushVersusGridState(), 500);
   setInterval(() => { if (window._gameMode === 'versus') pushVersusGridState(); }, 500);
 }
@@ -1466,6 +1517,7 @@ function showGameOver() {
 // ── Leave / Navigation ──
 function stopAllListeners() {
   clearInterval(gameTimerInterval);
+  clearInterval(window._timerResyncInterval);
   stopCursorTracking();
   if (_stopGameChat)     { _stopGameChat();     _stopGameChat     = null; }
   if (_stopCellSync)     { _stopCellSync();     _stopCellSync     = null; }
@@ -1656,13 +1708,16 @@ function toggleGameCode() {
 
 function copyGameLobbyCode() {
   if (!state.activeLobbyCode) return;
-  const code=document.getElementById('game-lobby-code')?.textContent;
-  if (!code||code==='—') return;
-  const url=window.location.origin+window.location.pathname+'?code='+code;
-  navigator.clipboard.writeText(url).then(()=>{
-    const lbl=document.getElementById('game-code-copy-label');
-    if (lbl) { lbl.textContent='Copied!'; setTimeout(()=>{ lbl.textContent='Copy link'; },1800); }
-  }).catch(()=>{});
+  const code = state.activeLobbyCode;
+  const url = window.location.origin + '/pages/lobby.html' + '?code=' + code;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.getElementById('game-code-copy-btn');
+    if (btn) {
+      btn.style.color = '#27ae60';
+      btn.style.borderColor = 'rgba(39,174,96,0.4)';
+      setTimeout(() => { btn.style.color = ''; btn.style.borderColor = ''; }, 2000);
+    }
+  }).catch(() => {});
 }
 
 function showForfeitConfirm() { openOverlay('forfeit-confirm-overlay'); }
@@ -1717,7 +1772,7 @@ if (!puzzleJson) {
       setupKeyboard();
     }).catch(e => {
       showToast('Failed to load puzzle: ' + e.message.slice(0, 60));
-      setTimeout(() => { window.location.href = 'lobby.html'; }, 1500);
+      setTimeout(() => { window.location.href = '/pages/lobby.html'; }, 1500);
     });
   } else {
     const puzzle = JSON.parse(puzzleJson);

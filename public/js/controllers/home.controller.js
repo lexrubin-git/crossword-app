@@ -180,7 +180,7 @@ async function doJoin() {
     }));
     updateChip();
     closeOverlay('join-overlay');
-    window.location.href = 'lobby.html';
+    window.location.href = '/pages/lobby.html';
   } catch (e) {
     console.error('doJoin error:', e);
     let errMsg = e.message;
@@ -209,7 +209,7 @@ async function goToLobby() {
       pixelAvatarData: state.pixelAvatarData || null,
     }));
     pruneStaleLobbies();
-    window.location.href = 'lobby.html';
+    window.location.href = '/pages/lobby.html';
   } catch (e) {
     showToast('Failed to create lobby: ' + e.message.slice(0, 60));
   }

@@ -18,6 +18,27 @@ let lobbyDiff = 'medium';
 let _lastPlayerListKey = '';
 let _returnDotsInterval = null;
 
+// ── Leave confirm overlay ──
+function showLeaveConfirm() {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+      <div style="background:var(--card-bg);border:0.5px solid var(--border2);border-radius:14px;padding:28px 28px 24px;max-width:320px;width:90%;display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:16px;font-weight:700;color:var(--text)">Leave lobby?</div>
+        <div style="font-size:13px;color:var(--text3);line-height:1.5">Go back to home page? You can always rejoin the lobby.</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+          <button id="leave-cancel-btn" class="btn-ghost" style="font-size:13px">Stay</button>
+          <button id="leave-confirm-btn" style="font-size:13px;padding:7px 16px;background:#e05151;color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600">Leave →</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#leave-cancel-btn').addEventListener('click', () => { overlay.remove(); resolve(false); });
+    overlay.querySelector('#leave-confirm-btn').addEventListener('click', () => { overlay.remove(); resolve(true); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+  });
+}
+
 // ── Lobby code banner ──
 function applyCodeVisibility() {
   const codeEl = document.getElementById('lobby-banner-code');
@@ -49,21 +70,17 @@ function toggleCodeVisibility() {
 function bannerCopy() {
   const url = window.location.origin + window.location.pathname + '?code=' + state.activeLobbyCode;
   navigator.clipboard.writeText(url).then(() => {
-    const lbl = document.getElementById('banner-copy-label');
-    if (lbl) { lbl.textContent = 'Copied!'; setTimeout(() => { lbl.textContent = 'Copy link'; }, 2000); }
+    const btn = document.getElementById('btn-banner-copy');
+    if (btn) {
+      btn.style.color = '#27ae60';
+      btn.style.borderColor = 'rgba(39,174,96,0.4)';
+      setTimeout(() => { btn.style.color = ''; btn.style.borderColor = ''; }, 2000);
+    }
   });
 }
 
 // ── Identity editor ──
 function initLobbyIdentityEditor() {
-  const fb = state.lastKnownPlayers[state.myPlayerId];
-  if (fb) {
-    if (fb.name) state.playerName = fb.name;
-    if (fb.colorHex) {
-      const found = COLORS.find(c => c.hex === fb.colorHex);
-      if (found) state.playerColor = found;
-    }
-  }
   document.getElementById('lobby-name-input').value = state.playerName;
   updateLobbyAvatar();
   const taken = takenColorHexes(state.myPlayerId);
@@ -202,7 +219,16 @@ async function ctxAction(action) {
       showToast('Player kicked.');
     } catch { showToast('Could not kick player.'); }
   } else if (action === 'giveHost') {
-    try { await transferHost(state.activeLobbyCode, _ctxTargetId, state.myPlayerId); state.isHost = false; showToast('Host transferred.'); renderStartBtn(); }
+    try {
+      await transferHost(state.activeLobbyCode, _ctxTargetId, state.myPlayerId);
+      state.isHost = false;
+      if (state.lastKnownPlayers[state.myPlayerId]) state.lastKnownPlayers[state.myPlayerId].isHost = false;
+      if (state.lastKnownPlayers[_ctxTargetId]) state.lastKnownPlayers[_ctxTargetId].isHost = true;
+      _lastPlayerListKey = '';
+      renderPlayerList();
+      showToast('Host transferred.');
+      renderStartBtn();
+    }
     catch { showToast('Could not transfer host.'); }
   }
   _ctxTargetId = null;
@@ -214,15 +240,6 @@ function renderPlayerList() {
   if (countEl) countEl.textContent = players.length;
 
   const subtitleEl = document.getElementById('lobby-subtitle');
-  if (players.length <= 1) {
-    if (subtitleEl) {
-      subtitleEl.innerHTML = 'Waiting for players to join<span id="waiting-dots"></span>';
-      startDots('waiting-dots', 'waiting');
-    }
-  } else {
-    if (subtitleEl) subtitleEl.innerHTML = `${players.length} players in the room<span id="room-dots"></span>`;
-    startDots('room-dots', 'room');
-  }
 
   console.log('renderPlayerList called, players:', JSON.stringify(players));
   const newKey = players.map(([id, p]) => `${id}:${p.name||''}:${p.colorHex}:${p.avatar||''}:${p.isHost?1:0}:${p.vote?1:0}:${p.inGame?1:0}`).join('|');
@@ -447,8 +464,6 @@ function renderVoteGrid() {
   }
   if (votesCard) votesCard.style.display = '';
 
-0
-
   Object.entries(dateCounts).sort((a,b) => b[1].voters.length - a[1].voters.length)
     .forEach(([dateKey, {voters, meta}]) => {
       const isMyVote = state.myVote === dateKey;
@@ -536,11 +551,13 @@ function setLobbySize(size) {
     if (standardDiff) standardDiff.style.display = 'none';
     if (largeDiff) largeDiff.style.display = 'flex';
     lobbyDiff = 'medium';
+    castLobbyVote(); // large always has medium, so vote immediately
   } else {
     if (standardDiff) standardDiff.style.display = 'flex';
     if (largeDiff) largeDiff.style.display = 'none';
+    // For standard, only cast vote once difficulty is also selected
+    if (lobbyDiff) castLobbyVote();
   }
-  castLobbyVote();
 }
 
 function setLobbyDiff(diff) {
@@ -553,7 +570,14 @@ function setLobbyDiff(diff) {
     setIdentityLocked(false); renderVoteGrid(); if (state.isHost) renderStartBtn();
     return;
   }
-  if (!lobbySize) return;
+  if (!lobbySize) {
+    lobbySize = 'standard';
+    document.querySelectorAll('.lobby-size-btn').forEach(b => b.classList.toggle('active', b.dataset.size === 'standard'));
+    const standardDiff = document.getElementById('lobby-diff-standard');
+    const largeDiff = document.getElementById('lobby-diff-large');
+    if (standardDiff) standardDiff.style.display = 'flex';
+    if (largeDiff) largeDiff.style.display = 'none';
+  }
   lobbyDiff = diff;
   document.querySelectorAll('.lobby-diff-btn').forEach(b => b.classList.toggle('active', b.dataset.diff === diff));
   castLobbyVote();
@@ -563,12 +587,22 @@ function setLobbyDiff(diff) {
 async function joinActiveMatch() {
   if (!state.activeLobbyCode || !window._fb) return;
   try {
-    const { get, ref, db } = window._fb;
+    const { get, set, ref, db } = window._fb;
     const snap = await get(ref(db, `lobbies/${state.activeLobbyCode}`));
     if (!snap.exists()) return;
     const data = snap.val();
     if (data.status !== 'started' || !data.puzzleDateKey) { showToast('No active match to join.'); return; }
     if (data.gameSettings?.gameEnded) { showToast('That match has already ended.'); return; }
+    // Ensure this player exists in the lobby before joining the game
+    if (state.myPlayerId) {
+      await set(ref(db, `lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`), {
+        name: state.playerName,
+        colorHex: state.playerColor.hex,
+        avatar: state.pixelAvatarData || null,
+        vote: null, voteMeta: null,
+        isHost: false, inGame: false,
+      }).catch(() => {});
+    }
     sessionStorage.setItem('gameMode', data.gameMode || 'together');
     sessionStorage.setItem('puzzleDateKey', data.puzzleDateKey);
     window.location.href = 'game.html';
@@ -580,26 +614,55 @@ function renderStartBtn() {
   if (!wrap) return;
 
   const data = state.lastLobbyData;
+  const players = Object.values(state.lastKnownPlayers);
+  const totalPlayers = players.length;
+  const votedPlayers = players.filter(p => p.vote).length;
+  const allVoted     = totalPlayers > 0 && votedPlayers >= totalPlayers;
+
+  const votedC = document.getElementById('footer-voted-count');
+  const totalC = document.getElementById('footer-total-count');
+  if (votedC) votedC.textContent = votedPlayers;
+  if (totalC) totalC.textContent = totalPlayers;
+
   if (data && data.status === 'started' && data.puzzleDateKey) {
     const gameIsEnded = data.gameSettings?.gameEnded === true;
     if (!gameIsEnded) {
       wrap.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:8px">
           <button class="btn-primary" id="join-active-btn" style="width:100%;justify-content:center">Join active match →</button>
+          ${state.isHost ? `<button class="btn-ghost" id="lobby-forfeit-active-btn" style="width:100%;justify-content:center;font-size:12px;background:#e05151;border-color:#e05151;color:var(--bg)">Forfeit game</button>` : ''}
           <span style="font-size:12px;color:var(--text3)">A game is currently in progress<span id="game-progress-dots"></span></span>
         </div>`;
       document.getElementById('join-active-btn')?.addEventListener('click', joinActiveMatch);
+      document.getElementById('lobby-forfeit-active-btn')?.addEventListener('click', () => {
+        if (!state.activeLobbyCode || !window._fb) return;
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+        overlay.innerHTML = `
+          <div style="background:var(--card-bg);border:0.5px solid var(--border2);border-radius:14px;padding:28px 28px 24px;max-width:320px;width:90%;display:flex;flex-direction:column;gap:12px">
+            <div style="font-size:16px;font-weight:700;color:var(--text)">Forfeit game?</div>
+            <div style="font-size:13px;color:var(--text3);line-height:1.5">This will end the current game for all players immediately.</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+              <button id="lobby-forfeit-cancel" class="btn-ghost" style="font-size:13px">Cancel</button>
+              <button id="lobby-forfeit-confirm" style="font-size:13px;padding:7px 16px;background:#e05151;color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600">Forfeit →</button>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        overlay.querySelector('#lobby-forfeit-cancel').addEventListener('click', () => overlay.remove());
+        overlay.querySelector('#lobby-forfeit-confirm').addEventListener('click', () => {
+          overlay.remove();
+          const { update, ref, db } = window._fb;
+          update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), { gameEnded: true }).catch(() => {});
+          showToast('Game ended.');
+        });
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      });
       startDots('game-progress-dots', 'gameProgress');
       setGameInProgressLock();
       return;
     }
   }
   unlockGamePanels();
-
-  const players = Object.values(state.lastKnownPlayers);
-  const totalPlayers  = players.length;
-  const votedPlayers  = players.filter(p => p.vote).length;
-  const allVoted      = totalPlayers > 0 && votedPlayers >= totalPlayers;
 
   // FIX 2: non-hosts see "waiting for host" + vote count below
   if (!state.isHost) {
@@ -990,8 +1053,6 @@ async function _doStartGame() {
     sessionStorage.setItem('gameMode', state.lobbyMode || 'together');
     sessionStorage.setItem('puzzleDateKey', chosenDateKey);
     sessionStorage.setItem('freshGameStart', '1');
-    // Clear votes atomically in the same write as startLobbyGame to avoid
-    // extra Firebase round-trips that can overwrite sessionStorage before redirect
     const voteClears = {};
     Object.keys(state.lastKnownPlayers).forEach(id => {
       voteClears[`players/${id}/vote`] = null;
@@ -1003,9 +1064,12 @@ async function _doStartGame() {
         await update(ref(db, `lobbies/${state.activeLobbyCode}`), {
           status: 'started',
           puzzleDateKey: chosenDateKey,
-          pendingPuzzleDateKey: null,
+          pendingPuzzleDateKey: chosenDateKey,
           startedAt: window._fb.serverTimestamp(),
           gameMode: state.lobbyMode,
+          rouletteActive: false,
+          rouletteWinnerKey: null,
+          rouletteOptions: null,
           ...voteClears,
         });
       } catch {}
@@ -1022,8 +1086,7 @@ async function _doStartGame() {
 function enterLobbyScreen() {
   const codeEl = document.getElementById('lobby-banner-code');
   if (codeEl) codeEl.textContent = state.activeLobbyCode;
-  const copyLbl = document.getElementById('banner-copy-label');
-  if (copyLbl) copyLbl.textContent = 'Copy link';
+  
   applyCodeVisibility();
 
   const chatContainer = document.getElementById('chat-messages');
@@ -1037,27 +1100,38 @@ function enterLobbyScreen() {
   state.myVote = null;
   state.myVoteMeta = { size: 'standard', diff: 'medium' };
   setIdentityLocked(false);
-  initLobbyIdentityEditor();
   document.querySelectorAll('.lobby-diff-btn').forEach(b => { b.style.opacity = ''; b.style.pointerEvents = ''; });
 
-  if (!state.lastKnownPlayers[state.myPlayerId]) {
-    state.lastKnownPlayers[state.myPlayerId] = {
-      name: state.playerName,
-      colorHex: state.playerColor.hex,
-      avatar: state.pixelAvatarData || null,
-      vote: null,
-      voteMeta: null,
-      isHost: state.isHost || false,
-      inGame: false,
-    };
-  }
+state.lastKnownPlayers[state.myPlayerId] = {
+  name: state.playerName,
+  colorHex: state.playerColor.hex,
+  avatar: state.pixelAvatarData || null,
+  vote: null,
+  voteMeta: null,
+  isHost: state.isHost || false,
+  inGame: false,
+};
+  initLobbyIdentityEditor();
   renderPlayerList();
   renderStartBtn();
 
   
 
-  subscribeChatFB();
-  subscribeLobbyFB();
+  if (state.activeLobbyCode && state.myPlayerId && window._fb) {
+  const { ref, set, db } = window._fb;
+  set(ref(db, `lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`), {
+    name: state.playerName,
+    colorHex: state.playerColor.hex,
+    avatar: state.pixelAvatarData || null,
+    vote: null,
+    voteMeta: null,
+    isHost: state.isHost || false,
+    inGame: false,
+  }).catch(() => {});
+}
+
+subscribeChatFB();
+subscribeLobbyFB();
 
   // Fallback: if after 2 seconds we still only see ourselves, do a one-time get
   setTimeout(() => {
@@ -1101,6 +1175,7 @@ function subscribeLobbyFB() {
       const data = snap.val();
       const players = data.players || {};
       Object.entries(players).forEach(([id, p]) => {
+        if (id === state.myPlayerId) return;
         state.lastKnownPlayers[id] = {
           name:     p.name     || '',
           colorHex: p.colorHex || '#888888',
@@ -1120,8 +1195,9 @@ function subscribeLobbyFB() {
   }
 
   lobbyListener = subscribeLobby(state.activeLobbyCode, snap => {
+    console.log('[SNAP]', { exists: snap.exists(), status: snap.val()?.status, puzzleDateKey: snap.val()?.puzzleDateKey, pendingKey: snap.val()?.pendingPuzzleDateKey, gameEnded: snap.val()?.gameSettings?.gameEnded });
     if (!snap.exists()) {
-      if (_hasReceivedValidSnapshot) { showToast('Lobby closed.'); leaveLobby(); }
+      if (_hasReceivedValidSnapshot) { showToast('Lobby closed.'); leaveLobby(true); }
       return;
     }
     _hasReceivedValidSnapshot = true;
@@ -1139,15 +1215,19 @@ function subscribeLobbyFB() {
     let stillInLobby = false;
     Object.entries(players).forEach(([id, p]) => {
       const existing = state.lastKnownPlayers[id] || {};
-      incoming[id] = {
-        name:     p.name     || existing.name     || '',
-        colorHex: p.colorHex || existing.colorHex || '#888888',
-        avatar:   p.avatar   !== undefined ? p.avatar   : (existing.avatar   || null),
-        vote:     p.vote     || null,
-        voteMeta: p.voteMeta || null,
-        isHost:   p.isHost !== undefined ? p.isHost : (existing.isHost || false),
-        inGame:   p.inGame !== undefined ? p.inGame : (existing.inGame || false),
-      };
+      if (id === state.myPlayerId) {
+        incoming[id] = existing;
+      } else {
+        incoming[id] = {
+          name:     p.name     || existing.name     || '',
+          colorHex: p.colorHex || existing.colorHex || '#888888',
+          avatar:   p.avatar   !== undefined ? p.avatar   : (existing.avatar   || null),
+          vote:     p.vote     || null,
+          voteMeta: p.voteMeta || null,
+          isHost:   p.isHost !== undefined ? p.isHost : (existing.isHost || false),
+          inGame:   p.inGame !== undefined ? p.inGame : (existing.inGame || false),
+        };
+      }
       if (id === state.myPlayerId) {
         state.isHost = p.isHost || false;
         stillInLobby = true;
@@ -1168,6 +1248,8 @@ function subscribeLobbyFB() {
       state.activeLobbyCode = null; state.myPlayerId = null; state.isHost = false;
       state._seenInLobby = false;
       showToast('You were kicked from the lobby.');
+      if (lobbyListener) { lobbyListener(); lobbyListener = null; }
+      if (chatListener)  { chatListener();  chatListener  = null; }
       window.location.href = 'index.html';
       return;
     }
@@ -1194,17 +1276,22 @@ function subscribeLobbyFB() {
       const gameIsEnded = data.gameSettings?.gameEnded === true;
       const returningFromGame = sessionStorage.getItem('returningFromGame') === '1';
       if (returningFromGame) {
-        // Clear once, then stay in lobby for all future snapshots this session
         sessionStorage.removeItem('returningFromGame');
         state._suppressGameRedirect = true;
       }
+      if (state._suppressGameRedirect && data.status === 'waiting') {
+        state._suppressGameRedirect = false;
+      }
       if (!gameIsEnded && !state.isHost && !returningFromGame && !state._suppressGameRedirect) {
-        // Always use pendingPuzzleDateKey — it's written before startLobbyGame so it's always present
         const puzzleKey = data.pendingPuzzleDateKey || data.puzzleDateKey;
         console.log('[REDIRECT] pendingPuzzleDateKey:', data.pendingPuzzleDateKey, '| puzzleDateKey:', data.puzzleDateKey, '| using:', puzzleKey);
-        if (!puzzleKey) return; // Wait for next snapshot when key is available
+        if (!puzzleKey) {
+          console.warn('[REDIRECT] status=started but no puzzleKey yet, waiting for next snapshot...');
+          return;
+        }
         sessionStorage.setItem('gameMode', data.gameMode || 'together');
         sessionStorage.setItem('puzzleDateKey', puzzleKey);
+        sessionStorage.removeItem('returningFromGame');
         window.location.href = 'game.html';
         return;
       }
@@ -1272,7 +1359,11 @@ function subscribeChatFB() {
 }
 
 // ── Leave lobby ──
-async function leaveLobby() {
+async function leaveLobby(skipConfirm = false) {
+  if (!skipConfirm) {
+    const confirmed = await showLeaveConfirm();
+    if (!confirmed) return;
+  }
   if (lobbyListener) { lobbyListener(); lobbyListener = null; }
   if (chatListener)  { chatListener();  chatListener  = null; }
   if (state.activeLobbyCode && state.myPlayerId) {
@@ -1317,6 +1408,15 @@ function saveSettings() {
 
 // ── Init ──
 function init() {
+  console.log('[INIT]', { activeLobbyCode: state.activeLobbyCode, myPlayerId: state.myPlayerId, isHost: state.isHost, sessionLobbyState: sessionStorage.getItem('lobbyState') });
+  // If arriving directly via ?code= URL with no session, redirect to home to handle join
+  const _directCode = new URLSearchParams(window.location.search).get('code');
+  const _savedState = (() => { try { return JSON.parse(sessionStorage.getItem('lobbyState') || 'null'); } catch { return null; } })();
+  if (_directCode && !state.activeLobbyCode && !_savedState?.activeLobbyCode) {
+    window.location.href = `/index.html?code=${_directCode}`;
+    return;
+  }
+
   if (!state.activeLobbyCode || !state.myPlayerId) {
     try {
       const saved = JSON.parse(sessionStorage.getItem('lobbyState') || 'null');
@@ -1339,9 +1439,26 @@ function init() {
     return;
   }
 
-  enterLobbyScreen();
+  // Always sync state from Firebase before entering lobby
+  if (window._fb) {
+    const { get, ref, db } = window._fb;
+    get(ref(db, `lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`)).then(snap => {
+      if (snap.exists()) {
+        const p = snap.val();
+        if (p.name) state.playerName = p.name;
+        if (p.colorHex) {
+          const found = COLORS.find(c => c.hex === p.colorHex);
+          if (found) state.playerColor = found;
+        }
+        if (p.avatar) state.pixelAvatarData = p.avatar;
+      }
+      enterLobbyScreen();
+    }).catch(() => enterLobbyScreen());
+  } else {
+    enterLobbyScreen();
+  }
 
-  document.getElementById('btn-leave-lobby')?.addEventListener('click', leaveLobby);
+  document.getElementById('btn-leave-lobby')?.addEventListener('click', () => leaveLobby(false));
   document.getElementById('btn-settings')?.addEventListener('click', openSettings);
   document.getElementById('settings-save-btn')?.addEventListener('click', saveSettings);
   document.getElementById('settings-cancel-btn')?.addEventListener('click', () => closeOverlay('settings-overlay'));
@@ -1378,8 +1495,25 @@ function init() {
 }
 
 function waitAndInit() {
-  if (window._fbReady) init();
-  else document.addEventListener('fb-ready', init, { once: true });
+  if (window._fbReady && window._fb) { init(); return; }
+  const handler = () => {
+    document.removeEventListener('fb-ready', handler);
+    window.removeEventListener('firebase-ready', handler);
+    clearInterval(poll);
+    init();
+  };
+  document.addEventListener('fb-ready', handler, { once: true });
+  window.addEventListener('firebase-ready', handler, { once: true });
+  let attempts = 0;
+  const poll = setInterval(() => {
+    if (window._fbReady && window._fb) {
+      clearInterval(poll);
+      document.removeEventListener('fb-ready', handler);
+      window.removeEventListener('firebase-ready', handler);
+      init();
+    }
+    if (++attempts > 100) clearInterval(poll);
+  }, 50);
 }
 
 window.leaveLobby            = leaveLobby;

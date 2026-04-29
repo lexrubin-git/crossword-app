@@ -513,8 +513,8 @@ function setLobbyMode(mode, fromSync = false) {
   if (mode === null) { removeVote(); lobbySize = null; lobbyDiff = null; document.querySelectorAll('.lobby-size-btn').forEach(b => b.classList.remove('active')); document.querySelectorAll('.lobby-diff-btn').forEach(b => b.classList.remove('active')); }
   const togetherCard = document.getElementById('mode-card-together');
   const versusCard   = document.getElementById('mode-card-versus');
+  const selBg = 'rgba(212,160,23,0.06)', selText = '#d4a017';
   if (togetherCard && versusCard) {
-    const selBg = 'rgba(212,160,23,0.06)', selText = '#d4a017';
     togetherCard.style.background = mode === 'together' ? selBg : 'var(--bg2)';
     togetherCard.style.borderTop = mode === 'together' ? '2px solid rgba(212,160,23,0.7)' : '2px solid transparent';
     togetherCard.style.padding = '12px 14px 16px';
@@ -528,6 +528,28 @@ function setLobbyMode(mode, fromSync = false) {
     if (v1) v1.style.color = mode === 'versus' ? selText : 'var(--text)';
     if (v2) v2.style.color = mode === 'versus' ? 'rgba(212,160,23,0.5)' : 'var(--text2)';
   }
+  const rankedCard = document.getElementById('mode-card-ranked');
+  if (rankedCard) {
+    rankedCard.style.background = mode === 'ranked' ? selBg : 'var(--bg2)';
+    rankedCard.style.borderTop = mode === 'ranked' ? '2px solid rgba(212,160,23,0.7)' : '2px solid transparent';
+    const rTitle = rankedCard.querySelector('div > div') || rankedCard.querySelector('div');
+    if (rTitle) {
+      rTitle.style.color = mode === 'ranked' ? selText : 'var(--text)';
+      if (!rankedCard.dataset.renamed) {
+        rankedCard.dataset.renamed = '1';
+        // Rename all text nodes that say "Ranked" anywhere in the card
+        rankedCard.querySelectorAll('*').forEach(el => {
+          if (el.children.length === 0 && el.textContent.trim() === 'Ranked') {
+            el.textContent = 'Race the Clock';
+          }
+        });
+        if (rTitle.textContent.trim() === 'Ranked') rTitle.textContent = 'Race the Clock';
+      }
+    }
+    const rDesc = rankedCard.children[1];
+    if (rDesc) rDesc.style.color = mode === 'ranked' ? 'rgba(212,160,23,0.5)' : 'var(--text2)';
+  }
+
   if (state.isHost && state.activeLobbyCode) {
     setLobbyModeFB(state.activeLobbyCode, mode || '').catch(() => {});
   }
@@ -679,7 +701,8 @@ function renderStartBtn() {
   const inGamePlayers  = players.filter(p => p.inGame && !p.isHost);
   const modeSelected   = state.lobbyMode !== null;
   const puzzleSelected = players.some(p => p.vote);
-  const startDisabled  = inGamePlayers.length > 0 || !modeSelected || !puzzleSelected;
+  const rankedOk = state.lobbyMode !== 'ranked' || totalPlayers >= 2;
+  const startDisabled  = inGamePlayers.length > 0 || !modeSelected || !puzzleSelected || !rankedOk;
   const startStyle     = startDisabled ? ' style="opacity:0.45;cursor:not-allowed"' : '';
 
   const gameActive = data && data.status === 'started' && !(data.gameSettings?.gameEnded);
@@ -696,6 +719,25 @@ function renderStartBtn() {
 
   document.getElementById('start-game-btn')?.addEventListener('click', () => {
     if (!startDisabled) { startGame(); return; }
+    if (!rankedOk) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+      overlay.innerHTML = `
+        <div style="background:var(--card-bg);border:0.5px solid var(--border2);border-radius:14px;padding:28px 28px 24px;max-width:320px;width:90%;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#e05151" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div style="font-size:15px;font-weight:700;color:var(--text)">Not enough players</div>
+          </div>
+          <div style="font-size:13px;color:var(--text3);line-height:1.5">Race the Clock mode requires at least <strong style="color:var(--text)">2 players</strong> to start.</div>
+          <div style="display:flex;justify-content:flex-end;margin-top:4px">
+            <button id="ranked-min-ok" style="font-size:13px;padding:7px 18px;background:var(--text);color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600">Got it</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#ranked-min-ok').addEventListener('click', () => overlay.remove());
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      return;
+    }
     const modeOverlay = document.getElementById('mode-missing-overlay');
     const puzzleOverlay = document.getElementById('puzzle-missing-overlay');
 if (modeOverlay) { modeOverlay.style.pointerEvents = 'all'; modeOverlay.style.display = !modeSelected ? 'flex' : 'none'; if (!modeSelected) setTimeout(() => { modeOverlay.style.display = 'none'; modeOverlay.style.pointerEvents = 'none'; }, 1000); }
@@ -1111,6 +1153,17 @@ state.lastKnownPlayers[state.myPlayerId] = {
   isHost: state.isHost || false,
   inGame: false,
 };
+  // Rename "Ranked" → "Race the Clock" on every load, regardless of selected mode
+  const rankedCard = document.getElementById('mode-card-ranked');
+  if (rankedCard && !rankedCard.dataset.renamed) {
+    rankedCard.dataset.renamed = '1';
+    rankedCard.querySelectorAll('*').forEach(el => {
+      if (el.children.length === 0 && el.textContent.trim() === 'Ranked') {
+        el.textContent = 'Race the Clock';
+      }
+    });
+  }
+
   initLobbyIdentityEditor();
   renderPlayerList();
   renderStartBtn();
@@ -1485,6 +1538,10 @@ function init() {
   });
   document.getElementById('mode-card-versus')?.addEventListener('click', () => {
     if (state.lobbyMode === 'versus') setLobbyMode(null); else setLobbyMode('versus');
+  });
+
+  document.getElementById('mode-card-ranked')?.addEventListener('click', () => {
+    if (state.lobbyMode === 'ranked') setLobbyMode(null); else setLobbyMode('ranked');
   });
 
   document.querySelectorAll('.lobby-size-btn').forEach(b => b.addEventListener('click', () => setLobbySize(b.dataset.size)));

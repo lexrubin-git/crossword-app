@@ -245,24 +245,7 @@
         <img src="../images/crosswordwithfriends.svg" style="width:100%;max-width:260px;height:auto;opacity:0.95" alt="Logo">
       </div>
 
-      <!-- Match code -->
-      <div class="game-sidebar-section" style="margin-bottom:8px">
-        <div style="background:var(--banner-bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <div style="min-width:0;flex:1">
-            <div class="banner-label" style="margin-bottom:2px">Match Code</div>
-            <span class="banner-code" id="game-lobby-code" style="font-size:15px;letter-spacing:.18em;filter:blur(8px);transition:filter .2s;user-select:none">????</span>
-          </div>
-          <div style="display:flex;gap:5px;align-items:center;flex-shrink:0">
-            <button class="code-hide-btn" id="game-code-eye-btn" title="Show/hide code">
-              <svg id="game-eye-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <svg id="game-eye-off-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-            </button>
-            <button class="lobby-code-btn" id="game-code-copy-btn" style="padding:5px 7px" title="Copy link">
-              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
+      
 
       <!-- Scores -->
       <div class="game-sidebar-section">
@@ -288,6 +271,25 @@
           <div class="game-chat-input-row">
             <input class="game-chat-input" id="game-chat-input" type="text" maxlength="200" tabindex="-1" placeholder="Say something…">
             <button class="chat-send" id="game-chat-send" disabled>↑</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Match code -->
+      <div class="game-sidebar-section" style="margin-bottom:8px">
+        <div style="background:var(--banner-bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="min-width:0;flex:1">
+            <div class="banner-label" style="margin-bottom:2px">Match Code</div>
+            <span class="banner-code" id="game-lobby-code" style="font-size:15px;letter-spacing:.18em;filter:blur(8px);transition:filter .2s;user-select:none">????</span>
+          </div>
+          <div style="display:flex;gap:5px;align-items:center;flex-shrink:0">
+            <button class="code-hide-btn" id="game-code-eye-btn" title="Show/hide code">
+              <svg id="game-eye-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg id="game-eye-off-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </button>
+            <button class="lobby-code-btn" id="game-code-copy-btn" style="padding:5px 7px" title="Copy link">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
           </div>
         </div>
       </div>

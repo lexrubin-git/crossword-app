@@ -48,6 +48,572 @@ let _cursorContainer = null;
 // Versus grid
 let _versusGridPushTimer = null;
 
+// ── Ranked ──
+const RANKED_INTERVAL_SEC = 120;
+let _rankedEliminationTimer = null;
+let _rankedCountdownTimer = null;
+let _rankedNextElimSec = 0;
+let _rankedEliminatedPlayers = new Set();
+let _rankedSpectatorIds = new Set();   // players who joined mid-match as spectators
+let _stopRankedSync = null;
+let _rankedCycleStartScores = {};      // DEPRECATED — kept for compat, no longer used for elimination
+let _rankedCycleNumber = 0;            // how many elimination rounds have fired
+let _rankedCycleWordsCorrect = 0;      // words THIS player got correct this cycle (local count, includes carry-over)
+let _rankedCarryOver = 0;              // words carried over from previous cycle for this player
+let _rankedPlayerCycleWords = {};      // { [playerId]: wordsThisCycle } — written to FB by each client, read by host
+
+async function _checkAllPlayersSafe() {
+  if (!state.isHost || !state.activeLobbyCode || !window._fb) return;
+  const { get, ref, db, update } = window._fb;
+  const snap = await get(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`)).catch(() => null);
+  const cycleWords = snap ? (snap.val() || {}) : {};
+  const active = Object.keys(state.lastKnownPlayers).filter(id =>
+    !_rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id)
+  );
+  if (active.length === 0) return;
+  const allSafe = active.every(id => (cycleWords[id] || 0) >= 3);
+  if (allSafe && _rankedNextElimSec > 5) {
+    const newAt = Date.now() + 5000;
+    await update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
+      rankedNextElimAt: newAt,
+    }).catch(() => {});
+  }
+}
+
+function ensureRankedStyles() {
+  if (document.getElementById('ranked-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'ranked-styles';
+  s.textContent = `
+    @keyframes rankedPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.55;transform:scale(1.06)} }
+    @keyframes rankCardIn  { from{opacity:0;transform:scale(.8) translateY(20px)} to{opacity:1;transform:scale(1) translateY(0)} }
+    @keyframes rankedGridFlash { 0%,100%{outline:3px solid rgba(224,81,81,0);outline-offset:3px} 50%{outline:3px solid rgba(224,81,81,0.85);outline-offset:3px} }
+    .ranked-elim-banner { position:fixed;inset:0;z-index:8000;display:flex;align-items:center;justify-content:center;pointer-events:none }
+    .ranked-elim-banner-grid { position:absolute;top:50%;left:50%;transform:translate(-50%,-50%); }
+    .ranked-elim-card { background:rgba(20,20,20,0.96);border:1.5px solid #e05151;border-radius:16px;padding:28px 36px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center;box-shadow:0 0 60px rgba(224,81,81,0.4);animation:rankCardIn .35s cubic-bezier(.22,.68,0,1.2) both }
+  `;
+  document.head.appendChild(s);
+}
+
+function getRankedLowestPlayer() {
+  const active = Object.entries(state.lastKnownPlayers)
+    .filter(([id]) => !_rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id))
+    .map(([id, p]) => ({ id, score: gameScores[id]||0, name: p.name||'Player', colorHex: p.colorHex||'#e05151' }))
+    .sort((a, b) => a.score !== b.score ? a.score - b.score : a.id.localeCompare(b.id));
+  return active[0] || null;
+}
+
+function renderRankedHUD() {
+  // Walk up from #clue-across to find a scrollable/sized container that is the left panel
+  const clueAcross = document.getElementById('clue-across');
+  const cluePanel = document.querySelector('.game-clues-wrap')
+    || document.querySelector('.game-left-panel')
+    || document.querySelector('.game-clues')
+    || (clueAcross && clueAcross.closest('.game-sidebar'))
+    || (clueAcross && clueAcross.parentElement && clueAcross.parentElement.parentElement && clueAcross.parentElement.parentElement.parentElement)
+    || (clueAcross && clueAcross.parentElement);
+  if (!cluePanel || cluePanel === document.body) {
+    // Fallback: inject into the grid label row like before
+    const labelRow = document.querySelector('.game-grid-wrap > div:first-child');
+    if (!labelRow) return;
+    let hud = document.getElementById('ranked-hud');
+    if (!hud) {
+      hud = document.createElement('div');
+      hud.id = 'ranked-hud';
+      hud.style.cssText = 'display:inline-flex;align-items:center;gap:7px;background:rgba(224,81,81,0.08);border:1px solid rgba(224,81,81,0.3);border-radius:8px;padding:5px 11px;white-space:nowrap';
+      const timerEl = document.getElementById('game-timer');
+      if (timerEl) labelRow.insertBefore(hud, timerEl);
+      else labelRow.appendChild(hud);
+    }
+    const m = Math.floor(_rankedNextElimSec/60), s = _rankedNextElimSec%60;
+    const urgent = _rankedNextElimSec <= 10;
+    const cycleWords = Math.min(3, _rankedCycleWordsCorrect);
+    const isSafe = cycleWords >= 3;
+    hud.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="${urgent?'#e05151':'var(--text3)'}" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l3 3"/></svg><span id="ranked-countdown" style="font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;color:${urgent?'#e05151':'var(--text)'}${urgent?';animation:rankedPulse .6s ease-in-out infinite':''}">${m}:${s<10?'0':''}${s}</span><div style="width:1px;height:16px;background:rgba(224,81,81,0.3)"></div><span style="font-size:11px;font-weight:700;color:${isSafe?'#27ae60':'#e05151'}">${isSafe?'✓ safe':`${cycleWords}/3`}</span>`;
+    return;
+  }
+
+  // In ranked mode, hide the logo and inject the HUD in its place
+  const logoEl = document.querySelector('.game-sidebar img[alt="Logo"]');
+  if (logoEl && !logoEl.dataset.rankedHidden) {
+    logoEl.dataset.rankedHidden = '1';
+    logoEl.style.display = 'none';
+  }
+  const logoParent = logoEl?.parentElement;
+
+  let hud = document.getElementById('ranked-hud');
+  if (!hud) {
+    hud = document.createElement('div');
+    hud.id = 'ranked-hud';
+    hud.style.cssText = 'border-radius:12px;overflow:hidden;';
+    if (logoParent && logoEl) {
+      logoParent.insertBefore(hud, logoEl.nextSibling);
+    } else {
+      cluePanel.insertBefore(hud, cluePanel.firstChild);
+    }
+  }
+
+  const m = Math.floor(_rankedNextElimSec/60), s = _rankedNextElimSec%60;
+  const urgent = _rankedNextElimSec <= 10;
+  const cycleWords = Math.min(3, _rankedCycleWordsCorrect);
+  const isSafe = cycleWords >= 3;
+  const gainColor = isSafe ? '#27ae60' : '#e05151';
+  const timerColor = urgent ? '#e05151' : 'var(--text)';
+
+  const cardBg = isSafe ? 'rgba(39,174,96,0.1)' : 'rgba(224,81,81,0.07)';
+  const cardBorder = isSafe ? 'rgba(39,174,96,0.45)' : 'rgba(224,81,81,0.28)';
+  hud.innerHTML = `
+    <div style="background:${cardBg};border:1.5px solid ${cardBorder};border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div style="display:flex;align-items:center;gap:7px;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="${urgent?'#e05151':isSafe?'#27ae60':'var(--text3)'}" stroke-width="2" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l3 3"/></svg>
+          <span id="ranked-countdown" style="font-size:22px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;color:${timerColor}${urgent?';animation:rankedPulse .6s ease-in-out infinite':''}">${m}:${s<10?'0':''}${s}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;font-size:13px;font-weight:800;color:${gainColor};background:${isSafe?'rgba(39,174,96,0.2)':'rgba(224,81,81,0.12)'};border:1px solid ${isSafe?'rgba(39,174,96,0.5)':'rgba(224,81,81,0.35)'};border-radius:7px;padding:4px 9px;">
+          ${isSafe ? '✓ safe' : `${cycleWords}/3`}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;">
+        <div><span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;background:rgba(224,81,81,0.15);border:1px solid #e05151;color:#e05151;letter-spacing:.05em;text-transform:uppercase;vertical-align:middle">Race the Clock</span></div>
+        <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.04em;">Get 3 words each round to survive</div>
+      </div>
+    </div>`;
+}
+
+function showEliminationBanner(name, color, isMe) {
+  ensureRankedStyles();
+  if (isMe) {
+    // Full blocking popup for the eliminated player
+    const overlay = document.createElement('div');
+    overlay.id = 'ranked-elim-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:8500;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+    overlay.innerHTML = `
+      <div style="background:var(--card-bg);border:1.5px solid #e05151;border-radius:16px;padding:36px 32px;max-width:340px;width:90%;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;box-shadow:0 0 60px rgba(224,81,81,0.35)">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#e05151" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        <div style="font-size:20px;font-weight:800;color:#e05151">You're out!</div>
+        <div style="font-size:13px;color:var(--text3);line-height:1.6">You can spectate other players to watch the game.</div>
+        <div style="display:flex;gap:10px;margin-top:4px;width:100%">
+          <button id="elim-spectate-btn" style="flex:1;padding:10px;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer;font-family:inherit">
+            👁 Spectate
+          </button>
+          <button id="elim-lobby-btn" style="flex:1;padding:10px;background:#e05151;border:none;border-radius:8px;font-size:13px;font-weight:600;color:#fff;cursor:pointer;font-family:inherit">
+            ← Lobby
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    stopRankedGridFlash();
+    overlay.querySelector('#elim-spectate-btn').addEventListener('click', () => {
+      overlay.remove();
+      enterSpectateMode();
+    });
+    overlay.querySelector('#elim-lobby-btn').addEventListener('click', () => {
+      overlay.remove();
+      doGoBackToLobby();
+    });
+  } else {
+    // Small banner for other players being eliminated
+    const gridContainer = document.querySelector('.game-grid-container');
+    const gridRect = gridContainer ? gridContainer.getBoundingClientRect() : null;
+    const wrap = document.createElement('div');
+    wrap.className = 'ranked-elim-banner';
+    if (gridRect) {
+      wrap.style.cssText = `position:fixed;z-index:8000;pointer-events:none;display:flex;align-items:center;justify-content:center;left:${gridRect.left}px;top:${gridRect.top}px;width:${gridRect.width}px;height:${gridRect.height}px;`;
+    }
+    wrap.innerHTML = `<div class="ranked-elim-card">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="${color}" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      <div style="font-size:15px;font-weight:800;color:${color}">${name} was eliminated</div>
+    </div>`;
+    document.body.appendChild(wrap);
+    setTimeout(() => wrap.remove(), 3500);
+  }
+}
+
+function showNoEliminationBanner() {
+  ensureRankedStyles();
+  const gridContainer = document.querySelector('.game-grid-container');
+  const gridRect = gridContainer ? gridContainer.getBoundingClientRect() : null;
+  const wrap = document.createElement('div');
+  wrap.className = 'ranked-elim-banner';
+  if (gridRect) {
+    wrap.style.cssText = `position:fixed;z-index:8000;pointer-events:none;display:flex;align-items:center;justify-content:center;left:${gridRect.left}px;top:${gridRect.top}px;width:${gridRect.width}px;height:${gridRect.height}px;`;
+  }
+  wrap.innerHTML = `<div class="ranked-elim-card" style="border-color:#d4a017;box-shadow:0 0 60px rgba(212,160,23,0.35)">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#d4a017" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
+    <div style="font-size:15px;font-weight:800;color:#d4a017">No players eliminated</div>
+    <div style="font-size:12px;color:var(--text3)">Everyone advances to the next round</div>
+  </div>`;
+  document.body.appendChild(wrap);
+  setTimeout(() => wrap.remove(), 3500);
+}
+
+async function doRankedElimination() {
+  if (!state.isHost || !state.activeLobbyCode || !window._fb) return;
+  const active = Object.entries(state.lastKnownPlayers)
+    .filter(([id]) => !_rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id))
+    .map(([id, p]) => ({ id, score: gameScores[id]||0, name: p.name||'Player', colorHex: p.colorHex||'#e05151' }));
+  if (active.length <= 1) { endRankedGame(); return; }
+
+  _rankedCycleNumber++;
+
+  // Read per-player cycle word counts from Firebase
+  const { get, update, ref, db } = window._fb;
+  const cwSnap = await get(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`)).catch(() => null);
+  const cycleWords = cwSnap ? (cwSnap.val() || {}) : {};
+
+  // Players who got fewer than 3 words this cycle (carry-over already baked into their count)
+  const victims = active.filter(p => (cycleWords[p.id] || 0) < 3);
+
+  if (victims.length === 0 || victims.length === active.length) {
+    // Everyone safe OR everyone failed — no elimination, roll to next round
+    const carryOvers = {};
+    active.forEach(p => { carryOvers[p.id] = Math.max(0, (cycleWords[p.id] || 0) - 3); });
+    const nextAt = Date.now() + RANKED_INTERVAL_SEC * 1000;
+    const newCycleWords = {};
+    active.forEach(p => { newCycleWords[p.id] = carryOvers[p.id] || 0; });
+    await update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
+      rankedNextElimAt: nextAt,
+      rankedNoElimAt: Date.now(),
+    }).catch(() => {});
+    await update(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), newCycleWords).catch(() => {});
+    return;
+  }
+
+  // Compute carry-overs for survivors
+  const carryOvers = {};
+  active.forEach(p => {
+    if (!victims.find(v => v.id === p.id)) {
+      carryOvers[p.id] = Math.max(0, (cycleWords[p.id] || 0) - 3);
+    }
+  });
+
+  // Never eliminate everyone — keep at least 1
+  const willRemain = active.length - victims.length;
+  const finalVictims = willRemain < 1 ? victims.slice(0, active.length - 1) : victims;
+  if (finalVictims.length === 0) { endRankedGame(); return; }
+
+  finalVictims.forEach(v => _rankedEliminatedPlayers.add(v.id));
+
+  // Reset cycle words: survivors get carry-over, eliminated get 0
+  const newCycleWords = {};
+  active.forEach(p => {
+    newCycleWords[p.id] = finalVictims.find(v => v.id === p.id) ? 0 : (carryOvers[p.id] || 0);
+  });
+
+  const nextAt = Date.now() + RANKED_INTERVAL_SEC * 1000;
+  const lastVictim = finalVictims[finalVictims.length - 1];
+  await update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
+    rankedEliminated: [..._rankedEliminatedPlayers],
+    rankedLastElimId: lastVictim.id,
+    rankedLastElimName: finalVictims.length > 1 ? finalVictims.map(v => v.name).join(' & ') : lastVictim.name,
+    rankedLastElimColor: lastVictim.colorHex,
+    rankedNextElimAt: nextAt,
+  }).catch(() => {});
+  await update(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), newCycleWords).catch(() => {});
+
+  if (active.length - finalVictims.length <= 1) setTimeout(endRankedGame, 3600);
+}
+
+function endRankedGame() {
+  stopRankedElimination();
+  clearInterval(gameTimerInterval);
+  const finish = window._lastGameStartedAt ? Math.max(0, Math.floor((Date.now()-window._lastGameStartedAt)/1000)) : gameTimerSec;
+  gameTimerSec = finish;
+  if (state.isHost && state.activeLobbyCode && window._fb) {
+    const { update, ref, db } = window._fb;
+    update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), { gameEnded: true, finishSec: finish }).catch(()=>{});
+  }
+  setTimeout(showGameOver, 600);
+}
+
+function startRankedElimination(nextElimAt) {
+  stopRankedElimination();
+  ensureRankedStyles();
+  _rankedNextElimSec = Math.max(0, Math.round((nextElimAt - Date.now()) / 1000));
+  renderRankedHUD();
+  _rankedCountdownTimer = setInterval(() => {
+    if (_rankedNextElimSec > 0) _rankedNextElimSec--;
+    const urgent = _rankedNextElimSec <= 10;
+    const el = document.getElementById('ranked-countdown');
+    if (el) {
+      const m = Math.floor(_rankedNextElimSec/60), s = _rankedNextElimSec%60;
+      el.textContent = `${m}:${s<10?'0':''}${s}`;
+      el.style.color = urgent ? '#e05151' : 'var(--text)';
+      el.style.animation = urgent ? 'rankedPulse .6s ease-in-out infinite' : '';
+    }
+    // Flash grid red for lowest-score player when countdown hits 10
+    if (_rankedNextElimSec === 10) {
+      const lowest = getRankedLowestPlayer();
+      if (lowest?.id === state.myPlayerId) startRankedGridFlash();
+    }
+    if (_rankedNextElimSec === 0) {
+      stopRankedGridFlash();
+      if (state.isHost) _rankedNextElimSec = RANKED_INTERVAL_SEC;
+      // Non-hosts: carry-over is handled by subscribeRankedFB when rankedNextElimAt resets
+    }
+    // Re-render full HUD every 5s or at key thresholds to keep "next out" name fresh
+    if (_rankedNextElimSec % 5 === 0 || _rankedNextElimSec === 10) renderRankedHUD();
+  }, 1000);
+  if (state.isHost) {
+    const ms = Math.max(0, nextElimAt - Date.now());
+    window._rankedFirstTimeout = setTimeout(async () => {
+      await doRankedElimination();
+      _rankedEliminationTimer = setInterval(async () => {
+        _rankedNextElimSec = RANKED_INTERVAL_SEC;
+        renderRankedHUD();
+        await doRankedElimination();
+      }, RANKED_INTERVAL_SEC * 1000);
+    }, ms);
+  }
+}
+
+function stopRankedElimination() {
+  clearInterval(_rankedEliminationTimer); clearInterval(_rankedCountdownTimer);
+  clearTimeout(window._rankedFirstTimeout);
+  _rankedEliminationTimer = null; _rankedCountdownTimer = null;
+  stopRankedGridFlash();
+  document.getElementById('ranked-hud')?.remove();
+  // Restore logo if it was hidden
+  const logoEl = document.querySelector('.game-sidebar img[alt="Logo"]');
+  if (logoEl && logoEl.dataset.rankedHidden) {
+    logoEl.style.display = '';
+    delete logoEl.dataset.rankedHidden;
+  }
+}
+
+function startRankedGridFlash() {
+  stopRankedGridFlash();
+  ensureRankedStyles();
+  const container = document.querySelector('.game-grid-container');
+  if (!container) return;
+  container.style.overflow = 'visible';
+  container.style.animation = 'rankedGridFlash 0.7s ease-in-out infinite';
+}
+
+function stopRankedGridFlash() {
+  const container = document.querySelector('.game-grid-container');
+  if (container) { container.style.animation = ''; container.style.overflow = ''; }
+}
+
+// ── Spectate mode ──
+let _spectateTargetId = null;
+let _stopSpectateGrid = null;
+
+const spectateState = {
+  targetId: null,
+  unsubscribe: null,
+};
+
+function enterSpectateMode() {
+  window._spectateMode = true;
+  const hi = document.getElementById('game-hidden-input');
+  if (hi) hi.disabled = true;
+  const gridContainer = document.querySelector('.game-grid-container');
+  // Blur only the grid itself, not the container (so the prompt card overlaid above isn't blurred)
+  const gameGrid = document.getElementById('game-grid');
+  if (gameGrid) gameGrid.style.filter = 'blur(3px)';
+  const ci = document.getElementById('game-chat-input');
+  if (ci) { ci.placeholder = 'Chat with other spectators…'; }
+  const ind = document.getElementById('nonhost-mode-indicator');
+  if (ind) ind.style.display = 'none';
+  if (gridContainer && !document.getElementById('spectate-prompt-card')) {
+    const card = document.createElement('div');
+    card.id = 'spectate-prompt-card';
+    card.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;background:var(--card-bg);border:1.5px solid #e05151;border-radius:14px;padding:20px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 0 40px rgba(224,81,81,0.3);pointer-events:none;';
+    card.innerHTML = `
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#e05151" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      <div style="font-size:15px;font-weight:800;color:#e05151">You're eliminated</div>
+      <div style="font-size:12px;color:var(--text3)">Click 👁 below to spectate a player</div>`;
+    gridContainer.style.position = 'relative';
+    gridContainer.appendChild(card);
+  }
+  // Retry until the versus preview wrap has player cards
+  const tryEyeballs = (attempts) => {
+    const wrap = document.getElementById('versus-previews-wrap');
+    const hasPlayers = wrap && wrap.querySelectorAll('.versus-preview-player').length > 0;
+    if (hasPlayers) { renderSpectateEyeballs(); return; }
+    if (attempts > 0) setTimeout(() => tryEyeballs(attempts - 1), 500);
+  };
+  tryEyeballs(10);
+}
+
+function renderSpectateEyeballs() {
+  const wrap = document.getElementById('versus-previews-wrap');
+  if (!wrap) { setTimeout(renderSpectateEyeballs, 600); return; }
+  const players = wrap.querySelectorAll('.versus-preview-player');
+  if (!players.length) { setTimeout(renderSpectateEyeballs, 600); return; }
+  players.forEach(playerDiv => {
+    if (playerDiv.querySelector('.spectate-eye-btn')) return;
+    const playerId = playerDiv.dataset.playerId;
+    if (!playerId) return;
+    const p = state.lastKnownPlayers[playerId];
+    const btn = document.createElement('button');
+    btn.className = 'spectate-eye-btn';
+    btn.style.cssText = 'margin-top:2px;background:transparent;border:1px solid var(--border2);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;color:var(--text3);font-family:inherit';
+    btn.textContent = '👁';
+    btn.title = `Spectate ${p?.name||'player'}`;
+    btn.addEventListener('click', () => spectatePlayer(playerDiv.dataset.playerId));
+    playerDiv.appendChild(btn);
+  });
+}
+
+function spectatePlayer(targetId) {
+  spectateState.targetId = targetId;
+  _spectateTargetId = targetId;
+
+  if (spectateState.unsubscribe) { spectateState.unsubscribe(); spectateState.unsubscribe = null; }
+  if (_stopSpectateGrid) { _stopSpectateGrid(); _stopSpectateGrid = null; }
+  if (!state.activeLobbyCode || !window._fb) return;
+
+  document.getElementById('spectate-prompt-card')?.remove();
+
+  const { onValue, ref, db } = window._fb;
+  const unsub = onValue(ref(db, `versusGrids/${state.activeLobbyCode}/${targetId}`), snap => {
+    const data = snap.val();
+    if (!data) return;
+    if (Object.keys(cellElCache).length === 0) {
+      let attempts = 0;
+      const retry = () => {
+        if (Object.keys(cellElCache).length > 0) { applySpectateGrid(data); return; }
+        if (++attempts < 15) setTimeout(retry, 200);
+      };
+      setTimeout(retry, 100);
+    } else {
+      applySpectateGrid(data);
+    }
+  });
+  spectateState.unsubscribe = unsub;
+  _stopSpectateGrid = unsub;
+
+  // Unblur the grid element (not the container — see enterSpectateMode)
+  const gameGridEl = document.getElementById('game-grid');
+  if (gameGridEl) gameGridEl.style.filter = 'none';
+  const gridContainer = document.querySelector('.game-grid-container');
+  if (gridContainer) gridContainer.style.filter = 'none';
+}
+
+function applySpectateGrid(data) {
+  if (!gameGrid || !currentMap) return;
+  if (Object.keys(cellElCache).length === 0) return;
+
+  const size    = currentMap.size;
+  const numCols = currentMap.cols || size;
+
+  if (!data.cells || !data.size) return;
+
+  const targetCols = data.cols || data.size;
+
+  // Build a set of keys that will receive data so we don't clear them
+  const incomingKeys = new Set();
+  data.cells.forEach((v, idx) => {
+    if (v === 2 || v === 3) {
+      const r = Math.floor(idx / targetCols);
+      const c = idx % targetCols;
+      if (r < size && c < numCols && !gameGrid[r][c].isBlack) incomingKeys.add(r + '_' + c);
+    }
+  });
+
+  // Clear all non-black, non-incoming cells
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < numCols; c++) {
+      if (gameGrid[r][c].isBlack) continue;
+      if (incomingKeys.has(r + '_' + c)) continue;
+      const letterEl = document.getElementById(`cell-letter-${r}-${c}`);
+      const cellEl   = getCellEl(r, c);
+      if (letterEl) { letterEl.textContent = ''; letterEl.style.color = ''; letterEl.style.fontSize = ''; letterEl.style.fontWeight = ''; }
+      if (cellEl) { cellEl.classList.remove('has-letter', 'correct', 'wrong', 'word-highlight', 'selected'); cellEl.style.background = ''; cellEl.style.borderColor = ''; }
+    }
+  }
+
+  // Apply incoming data
+  data.cells.forEach((v, idx) => {
+    const r = Math.floor(idx / targetCols);
+    const c = idx % targetCols;
+    if (r >= size || c >= numCols) return;
+    if (gameGrid[r][c].isBlack) return;
+    const letterEl = document.getElementById(`cell-letter-${r}-${c}`);
+    const cellEl   = getCellEl(r, c);
+    if (v === 3) {
+      // Correctly solved — show as solid green cell with a checkmark, no letter revealed
+      if (letterEl) { letterEl.textContent = '✓'; letterEl.style.color = '#fff'; letterEl.style.fontSize = '13px'; letterEl.style.fontWeight = '700'; }
+      if (cellEl) { cellEl.classList.add('has-letter', 'correct'); cellEl.classList.remove('wrong'); cellEl.style.background = '#27ae60'; cellEl.style.borderColor = '#1e8449'; }
+    } else if (v === 2) {
+      // Filled but not confirmed correct — neutral dot
+      if (letterEl) { letterEl.textContent = '·'; letterEl.style.color = 'var(--text3)'; letterEl.style.fontSize = '18px'; letterEl.style.fontWeight = ''; }
+      if (cellEl) { cellEl.classList.add('has-letter'); cellEl.classList.remove('correct', 'wrong'); cellEl.style.background = ''; cellEl.style.borderColor = ''; }
+    }
+  });
+
+  const gameGridEl = document.getElementById('game-grid');
+  if (gameGridEl) gameGridEl.style.filter = 'none';
+  const gridContainer = document.querySelector('.game-grid-container');
+  if (gridContainer) gridContainer.style.filter = 'none';
+}
+
+function subscribeRankedFB() {
+  if (_stopRankedSync) { _stopRankedSync(); _stopRankedSync = null; }
+  if (!state.activeLobbyCode || !window._fb) return;
+  const { onValue, ref, db } = window._fb;
+  // Live-sync all players' cycle word counts for the score list
+  onValue(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), snap => {
+    const data = snap.val() || {};
+    Object.entries(data).forEach(([id, count]) => {
+      _rankedPlayerCycleWords[id] = count || 0;
+    });
+    renderGameScores();
+    if (state.isHost) _checkAllPlayersSafe();
+  });
+  _stopRankedSync = onValue(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), snap => {
+    const s = snap.val() || {};
+    if (!window._rankedBannerShown) window._rankedBannerShown = new Set();
+    (s.rankedEliminated || []).forEach(id => _rankedEliminatedPlayers.add(id));
+    if (s.rankedSpectators) {
+      let spectatorChanged = false;
+      Object.keys(s.rankedSpectators).forEach(id => {
+        if (!_rankedSpectatorIds.has(id)) spectatorChanged = true;
+        _rankedSpectatorIds.add(id);
+        if (state.lastKnownPlayers[id] && id !== state.myPlayerId) {
+          state.lastKnownPlayers[id]._kicked = true;
+        }
+      });
+      if (spectatorChanged) renderGameScores();
+    }
+    const bannerKey = (s.rankedLastElimId || '') + '|' + (s.rankedNextElimAt || '');
+    if (s.rankedLastElimId && !window._rankedBannerShown.has(bannerKey)) {
+      window._rankedBannerShown.add(bannerKey);
+      const isMe = s.rankedLastElimId === state.myPlayerId;
+      showEliminationBanner(s.rankedLastElimName || 'A player', s.rankedLastElimColor || '#e05151', isMe);
+      renderRankedHUD();
+    }
+    const noElimKey = 'noelim|' + (s.rankedNoElimAt || '');
+    if (s.rankedNoElimAt && !window._rankedBannerShown.has(noElimKey)) {
+      window._rankedBannerShown.add(noElimKey);
+      showNoEliminationBanner();
+    }
+    if (!state.isHost && s.rankedNextElimAt) {
+      const newSec = Math.max(0, Math.round((s.rankedNextElimAt - Date.now()) / 1000));
+      // If a new cycle just started (time jumped back up), pull carry-over from Firebase
+      if (newSec > _rankedNextElimSec + 10 && state.myPlayerId) {
+        const { get, ref, db } = window._fb;
+        get(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords/${state.myPlayerId}`)).then(snap => {
+          _rankedCycleWordsCorrect = snap.exists() ? (snap.val() || 0) : 0;
+          _rankedCarryOver = _rankedCycleWordsCorrect;
+          renderRankedHUD();
+        }).catch(() => {});
+      }
+      _rankedNextElimSec = newSec;
+    }
+    if (s.gameEnded === true) {
+      const go = document.getElementById('game-over-overlay');
+      if (go?.classList.contains('hidden') && window._puzzleCompletionAllowed) {
+        clearInterval(gameTimerInterval);
+        if (s.finishSec != null) gameTimerSec = s.finishSec;
+        setTimeout(showGameOver, 400);
+      }
+    }
+  });
+}
+
 // Cell element cache
 const cellElCache = {};
 function getCellEl(r, c) { return cellElCache[r+'_'+c] || null; }
@@ -110,6 +676,16 @@ function enterGame(map, gameMode) {
   autocheckEnabled = false;
   chatGuessMode = false;
   chatGuessHard = false;
+
+  _rankedEliminatedPlayers = new Set();
+  _rankedSpectatorIds = new Set();
+  _rankedCycleStartScores = {};
+  _rankedCycleNumber = 0;
+  _rankedCycleWordsCorrect = 0;
+  _rankedCarryOver = 0;
+  _rankedPlayerCycleWords = {};
+  stopRankedElimination();
+  if (_stopRankedSync) { _stopRankedSync(); _stopRankedSync = null; }
 
   document.getElementById('game-over-overlay')?.classList.add('hidden');
 
@@ -216,13 +792,25 @@ function enterGame(map, gameMode) {
       window._gridReady = true;
       applyChatGuessModeUI(false, false);
 
-      // Show host toolbar
+      // Mode pill above scores
+      const scoreLabelEl = document.querySelector('#game-score-list')?.closest('[style*="border-radius:10px"]')?.previousElementSibling?.querySelector('.game-sidebar-label');
+      if (scoreLabelEl) {
+        const mode = window._gameMode;
+        const pillHtml = mode === 'ranked'
+          ? ' <span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;background:rgba(224,81,81,0.15);border:1px solid #e05151;color:#e05151;letter-spacing:.05em;text-transform:uppercase;vertical-align:middle;margin-left:5px">Race the Clock</span>'
+          : mode === 'versus'
+          ? ' <span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;background:rgba(255,255,255,0.08);border:1px solid var(--border2);color:var(--text2);letter-spacing:.05em;text-transform:uppercase;vertical-align:middle;margin-left:5px">Versus</span>'
+          : ' <span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;background:rgba(255,255,255,0.08);border:1px solid var(--border2);color:var(--text2);letter-spacing:.05em;text-transform:uppercase;vertical-align:middle;margin-left:5px">Together</span>';
+        scoreLabelEl.innerHTML = 'Scores' + pillHtml;
+      }
+
+      // Show host toolbar (hidden in ranked mode)
       const toolbar = document.getElementById('game-host-toolbar');
-      if (toolbar) toolbar.style.display = state.isHost ? 'flex' : 'none';
+      if (toolbar) toolbar.style.display = (state.isHost && window._gameMode !== 'ranked') ? 'flex' : 'none';
       const codeEl = document.getElementById('game-lobby-code');
       if (codeEl) codeEl.textContent = state.activeLobbyCode || '—';
 
-      if (window._gameMode === 'versus') {
+      if (window._gameMode === 'versus' || window._gameMode === 'ranked') {
         autocheckEnabled = true;
         updateAutocheckPill(true);
         // Hide check/reveal in versus
@@ -245,6 +833,33 @@ function enterGame(map, gameMode) {
         startVersusGridPreview();
         setTimeout(() => pushVersusGridState(), 50);
         setTimeout(() => pushVersusGridState(), 200);
+
+        if (window._gameMode === 'ranked') {
+          ensureRankedStyles();
+          subscribeRankedFB();
+          if (state.activeLobbyCode) {
+            pushGameSettingFB(state.activeLobbyCode, 'chatGuessMode', true);
+            pushGameSettingFB(state.activeLobbyCode, 'chatGuessHard', false);
+          }
+          applyChatGuessModeUI(true, false);
+          if (state.isHost) {
+            const firstAt = Date.now() + RANKED_INTERVAL_SEC * 1000;
+            const { update, ref, db } = window._fb;
+            update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
+              rankedNextElimAt: firstAt, rankedEliminated: [], rankedLastElimId: null,
+            }).catch(()=>{});
+            startRankedElimination(firstAt);
+          } else {
+            const poll = setInterval(() => {
+              const { get, ref, db } = window._fb;
+              get(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings/rankedNextElimAt`)).then(snap => {
+                if (snap.exists() && snap.val()) { clearInterval(poll); startRankedElimination(snap.val()); }
+              }).catch(()=>{});
+            }, 500);
+            window._rankedClockPoll = poll;
+          }
+        }
+
       } else {
         // Restore check/reveal
         ['host-check-group','host-check-divider','host-reveal-group','host-reveal-divider']
@@ -280,7 +895,10 @@ function enterGame(map, gameMode) {
         const nhIndicator = document.getElementById('nonhost-mode-indicator');
         if (!nhIndicator) return;
         const isVersus = window._gameMode === 'versus';
-        if (isVersus) {
+        const isRanked = window._gameMode === 'ranked';
+        if (isRanked) {
+          nhIndicator.style.display = 'none';
+        } else if (isVersus) {
           nhIndicator.style.display = '';
           nhIndicator.innerHTML = '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(255,255,255,0.1);border:1px solid var(--border2);color:var(--text);letter-spacing:.05em;text-transform:uppercase;vertical-align:middle">Versus</span>&nbsp; Race to complete the grid first — your grid is private';
         } else if (!state.isHost) {
@@ -352,6 +970,61 @@ function enterGame(map, gameMode) {
       return;
     }
 
+    // Auto-spectate: if joining ranked mid-match and not already eliminated or spectating
+    if (window._gameMode === 'ranked' && !window._spectateMode && !window._rankedAutoSpectateChecked) {
+      window._rankedAutoSpectateChecked = true;
+      if (window._fb && state.activeLobbyCode) {
+        const { get, ref, db } = window._fb;
+        get(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`)).then(s => {
+          const gs = s.val() || {};
+          const eliminated = gs.rankedEliminated || [];
+          const gameAlreadyStarted = gs.rankedNextElimAt && (gs.rankedNextElimAt - Date.now()) < (RANKED_INTERVAL_SEC * 1000 - 5000);
+          if (gameAlreadyStarted && !eliminated.includes(state.myPlayerId)) {
+            _rankedSpectatorIds.add(state.myPlayerId);
+            window._isSpectatorJoin = true;
+            // Tell Firebase this player is a spectator so host excludes them from elimination
+            if (window._fb && state.activeLobbyCode && state.myPlayerId) {
+              const { update, ref, db } = window._fb;
+              update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings/rankedSpectators`), {
+                [state.myPlayerId]: true
+              }).catch(() => {});
+            }
+            // Enter spectate silently — skip the "You're eliminated" prompt card
+            window._spectateMode = true;
+            const hi = document.getElementById('game-hidden-input');
+            if (hi) hi.disabled = true;
+            const gameGridEl = document.getElementById('game-grid');
+            if (gameGridEl) gameGridEl.style.filter = 'blur(3px)';
+            const ci = document.getElementById('game-chat-input');
+            if (ci) ci.placeholder = 'Spectating — chat with others…';
+            const ind = document.getElementById('nonhost-mode-indicator');
+            if (ind) ind.style.display = 'none';
+            const gridContainer = document.querySelector('.game-grid-container');
+            if (gridContainer && !document.getElementById('spectate-prompt-card')) {
+              const card = document.createElement('div');
+              card.id = 'spectate-prompt-card';
+              card.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;background:var(--card-bg);border:1.5px solid #7b8cde;border-radius:14px;padding:20px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 0 40px rgba(123,140,222,0.3);pointer-events:none;';
+              card.innerHTML = `
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#7b8cde" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                <div style="font-size:15px;font-weight:800;color:#7b8cde">You're spectating</div>
+                <div style="font-size:12px;color:var(--text3)">Click 👁 below to watch a player</div>`;
+              gridContainer.style.position = 'relative';
+              gridContainer.appendChild(card);
+            }
+            renderGameScores();
+            const tryEyeballs = (attempts) => {
+              const wrap = document.getElementById('versus-previews-wrap');
+              const hasPlayers = wrap && wrap.querySelectorAll('.versus-preview-player').length > 0;
+              if (hasPlayers) { renderSpectateEyeballs(); return; }
+              if (attempts > 0) setTimeout(() => tryEyeballs(attempts - 1), 500);
+            };
+            tryEyeballs(10);
+            showToast('You joined mid-match — spectating.');
+          }
+        }).catch(() => {});
+      }
+    }
+
     Object.entries(players).forEach(([id, p]) => {
       if (!p) return;
       if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
@@ -385,9 +1058,9 @@ function enterGame(map, gameMode) {
         if (typeof p.isHost === 'boolean' && p.isHost !== state.isHost) {
           state.isHost = p.isHost;
           const toolbar = document.getElementById('game-host-toolbar');
-          if (toolbar) toolbar.style.display = state.isHost ? 'flex' : 'none';
+          if (toolbar) toolbar.style.display = (state.isHost && window._gameMode !== 'ranked') ? 'flex' : 'none';
           const nhIndicator = document.getElementById('nonhost-mode-indicator');
-          if (nhIndicator) nhIndicator.style.display = state.isHost ? 'none' : '';
+          if (nhIndicator) nhIndicator.style.display = (state.isHost && window._gameMode !== 'ranked') ? 'none' : '';
         }
       }
     });
@@ -405,13 +1078,13 @@ function enterGame(map, gameMode) {
           update(ref(db, `lobbies/${state.activeLobbyCode}`), upd).catch(() => {});
         }
         const toolbar = document.getElementById('game-host-toolbar');
-        if (toolbar) toolbar.style.display = 'flex';
+        if (toolbar) toolbar.style.display = window._gameMode !== 'ranked' ? 'flex' : 'none';
         const nhIndicator = document.getElementById('nonhost-mode-indicator');
-        if (nhIndicator) nhIndicator.style.display = 'none';
+        if (nhIndicator) nhIndicator.style.display = window._gameMode !== 'ranked' ? 'none' : '';
       }
     }
     // Live-update versus preview grid player info
-    if (window._gameMode === 'versus') {
+    if (window._gameMode === 'versus' || window._gameMode === 'ranked') {
       const wrap = document.getElementById('versus-previews-wrap');
       if (wrap) {
         Object.entries(players).forEach(([id, p]) => {
@@ -509,6 +1182,8 @@ function restoreGridLetters() {
       const cellEl = getCellEl(r, c);
       if (cellEl) {
         cellEl.classList.add('has-letter');
+        cellEl.style.background = '';
+        cellEl.style.borderColor = '';
         if (cell.revealed) { cellEl.classList.add('correct'); cellEl.classList.remove('wrong'); }
         else if (autocheckEnabled || chatGuessMode) autocheckCell(r, c);
       }
@@ -714,13 +1389,13 @@ function typeLetter(letter) {
   if (cellEl) cellEl.classList.add('has-letter');
   if (autocheckEnabled) recomputeScores();
   if (state.activeLobbyCode) {
-    if (window._gameMode==='versus') {
+    if (window._gameMode==='versus'||window._gameMode==='ranked') {
       pushVersusPlayerCellToFB(state.activeLobbyCode, state.myPlayerId, row, col, letter, state.myPlayerId, state.playerColor.hex);
     } else {
       pushCellToFB(state.activeLobbyCode, row, col, letter, state.myPlayerId, state.playerColor.hex);
     }
   }
-  if (window._gameMode==='versus' && state.activeLobbyCode) pushVersusGridState();
+  if ((window._gameMode==='versus'||window._gameMode==='ranked') && state.activeLobbyCode) pushVersusGridState();
   advanceInWordAlways();
   autocheckCell(row,col);
   checkWordComplete();
@@ -753,13 +1428,13 @@ function eraseLetter() {
     if (letterEl) { letterEl.textContent=''; letterEl.style.color=''; }
     if (cellEl) cellEl.classList.remove('has-letter','wrong');
     if (state.activeLobbyCode) {
-      if (window._gameMode==='versus') {
+      if (window._gameMode==='versus'||window._gameMode==='ranked') {
         pushVersusPlayerCellToFB(state.activeLobbyCode, state.myPlayerId, row, col, '', null, null);
       } else {
         pushCellToFB(state.activeLobbyCode,row,col,'',null,null);
       }
     }
-    if (window._gameMode==='versus') pushVersusGridState();
+    if (window._gameMode==='versus'||window._gameMode==='ranked') pushVersusGridState();
   } else {
     if (selectedWord) { const cells=selectedWord.cells; const idx=cells.findIndex(c=>c.row===row&&c.col===col); if (idx>0) { selectedCell=cells[idx-1]; updateGridHighlight(); } }
   }
@@ -797,6 +1472,18 @@ function applyFullGridSnapshot(snap) {
   });
   window._snapshotLoaded=true;
   if (autocheckEnabled) { runAutocheck(); if (state.isHost) recomputeScores(); renderGameScores(); }
+  // In ranked mode, re-mark all correct cells green after snapshot restore
+  if (window._gameMode === 'ranked') {
+    gameWords.forEach(w => {
+      const fullyCorrect = w.cells.every((c,i) => gameGrid[c.row][c.col].letter === w.answer[i]);
+      if (fullyCorrect) {
+        w.cells.forEach(c => {
+          const el = getCellEl(c.row, c.col);
+          if (el) { el.classList.add('correct', 'has-letter'); el.classList.remove('wrong'); }
+        });
+      }
+    });
+  }
 }
 
 function applyRemoteCell(r,c,letter,filledBy,filledColor,revealed) {
@@ -911,19 +1598,37 @@ function renderGameScores() {
     const p=state.lastKnownPlayers[id]||(id===meId?{name:state.playerName||'Player',colorHex:state.playerColor.hex||'#888',avatar:state.pixelAvatarData||null}:null);
     if (!p) return;
     const isGone=state.lastKnownPlayers[id]&&(state.lastKnownPlayers[id]._disconnected||state.lastKnownPlayers[id]._kicked);
-    if (isGone&&score<1&&id!==meId) return;
+    const isRankedSpectator = window._gameMode==='ranked' && _rankedSpectatorIds.has(id);
+    if (isGone&&score<1&&id!==meId&&!isRankedSpectator) return;
     const displayP=id===meId?{...p,name:state.playerName||p.name,colorHex:state.playerColor.hex||p.colorHex,avatar:state.pixelAvatarData||p.avatar||null}:p;
     const row=document.createElement('div');
     row.className='game-score-row'+(id===meId?' me':'');
     if (id===meId) row.style.border='1px solid rgba(255,255,255,0.85)';
     const avatarStyle=displayP.avatar?`background-image:url(${displayP.avatar});background-color:${displayP.colorHex}`:`background-color:${displayP.colorHex}`;
     const initial=(displayP.name||'?').charAt(0).toUpperCase();
-    const displayScore=(autocheckEnabled||chatGuessMode)?score:'—';
     // FIX 6: host tag next to score, not name
     const hostTag=state.lastKnownPlayers[id]?.isHost?'<span class="player-badge host" style="margin-left:6px">host</span>':'';
+    const isElim = window._gameMode==='ranked' && _rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id);
+    const isSpectator = window._gameMode==='ranked' && (_rankedSpectatorIds.has(id) || (id===state.myPlayerId && window._isSpectatorJoin));
+    // Apply faded opacity for eliminated players, but not spectatorss
+    if (isElim && !isSpectator) row.style.opacity='0.4';
+    if (isSpectator) row.style.opacity='0.4';
+    const elimTag = isSpectator
+      ? '<span class="player-badge" style="margin-left:6px;background:rgba(100,100,255,0.18);color:#7b8cde;border-color:rgba(100,100,255,0.4)">spectating</span>'
+      : isElim ? '<span class="player-badge" style="margin-left:6px;background:rgba(224,81,81,0.18);color:#e05151;border-color:rgba(224,81,81,0.4)">out</span>' : '';
+    // Spectators always show —, active players show score only when autocheck/chatGuess is on
+    const displayScore = isSpectator ? '' : isElim ? '' :
+      (window._gameMode === 'ranked')
+        ? (() => {
+            const cw = id === state.myPlayerId
+              ? Math.min(3, _rankedCycleWordsCorrect)
+              : Math.min(3, _rankedPlayerCycleWords[id] || 0);
+            return `${cw}/3`;
+          })()
+        : (autocheckEnabled||chatGuessMode) ? score : '—';
     row.innerHTML=`
       <div class="game-score-avatar" style="${avatarStyle};cursor:pointer" data-avatar="${(displayP.avatar||'').replace(/"/g,'&quot;')}" data-color="${displayP.colorHex}" data-name="${(displayP.name||'Player').replace(/"/g,'&quot;')}" data-initial="${initial}">${displayP.avatar?'':initial}</div>
-      <div class="game-score-name">${displayP.name||'Player'}${hostTag}</div>
+      <div class="game-score-name">${displayP.name||'Player'}${hostTag}${elimTag}</div>
       <div class="game-score-val">${displayScore}</div>
     `;
     row.querySelector('.game-score-avatar').addEventListener('click', function(e) {
@@ -1010,7 +1715,7 @@ function checkPuzzleComplete() {
       ? Math.max(0, Math.floor((Date.now() - window._lastGameStartedAt) / 1000))
       : gameTimerSec;
     gameTimerSec = authFinishSec;
-    if (window._gameMode==='versus') {
+    if (window._gameMode==='versus'||window._gameMode==='ranked') {
       if (window._fb&&state.activeLobbyCode&&state.myPlayerId) {
         const {update,ref,db}=window._fb;
         update(ref(db,`lobbies/${state.activeLobbyCode}/versusFinish/${state.myPlayerId}`),{finishSec:authFinishSec,name:state.playerName,colorHex:state.playerColor.hex,ts:Date.now()}).catch(()=>{});
@@ -1151,11 +1856,34 @@ function fillWordInGrid(word,guess,playerId,playerColorHex,skipFBPush) {
     const letterEl=document.getElementById(`cell-letter-${c.row}-${c.col}`);
     if (letterEl) { letterEl.textContent=guess[i]; letterEl.style.color=playerColorHex; }
     if (cellEl) { cellEl.classList.add('has-letter','correct'); cellEl.classList.remove('wrong'); }
-    if (!skipFBPush&&state.activeLobbyCode) pushCellToFB(state.activeLobbyCode,c.row,c.col,guess[i],playerId,playerColorHex);
+    if (!skipFBPush&&state.activeLobbyCode) {
+      if (window._gameMode==='versus'||window._gameMode==='ranked') {
+        pushVersusPlayerCellToFB(state.activeLobbyCode,playerId,c.row,c.col,guess[i],playerId,playerColorHex);
+      } else {
+        pushCellToFB(state.activeLobbyCode,c.row,c.col,guess[i],playerId,playerColorHex);
+      }
+    }
   });
   const clueEl=document.getElementById(`clue-item-${word.dir}-${word.num}`);
   if (clueEl) { clueEl.classList.add('completed'); const t=clueEl.querySelector('.game-clue-text'); if (t) t.style.textDecoration='line-through'; }
+  // In ranked mode, track how many words this player has gotten correct this cycle
+  if (window._gameMode === 'ranked' && playerId === state.myPlayerId) {
+    _rankedCycleWordsCorrect++;
+    renderRankedHUD();
+    // Push to Firebase so host can read it for elimination decisions
+    if (state.activeLobbyCode && window._fb) {
+      const { update, ref, db } = window._fb;
+      update(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), {
+        [state.myPlayerId]: _rankedCycleWordsCorrect
+      }).catch(() => {});
+    }
+    // If all active players have hit 3, collapse timer to 5 seconds
+    if (state.isHost && _rankedCycleWordsCorrect >= 3) {
+      _checkAllPlayersSafe();
+    }
+  }
   recomputeScores(); renderGameScores(); checkPuzzleComplete(); updateGridHighlight();
+  if ((window._gameMode==='versus'||window._gameMode==='ranked')&&state.activeLobbyCode) pushVersusGridState();
   if (!state.isHost&&state.activeLobbyCode) pushScoreToFB(state.activeLobbyCode,state.myPlayerId,{score:gameScores[state.myPlayerId]||0,name:state.playerName,colorHex:state.playerColor.hex,avatar:state.pixelAvatarData||null});
 }
 
@@ -1199,19 +1927,21 @@ async function sendGameChat() {
   input.value=''; if (sendBtn) sendBtn.disabled=true;
   const pId=state.myPlayerId||'solo';
   const pColor=state.playerColor.hex||'#888';
-  if (chatGuessMode) {
+  if (chatGuessMode && !window._spectateMode) {
     const pointsBefore=gameScores[pId]||0;
     const result=processChatGuess(text,pId,pColor);
     if (result!==null) {
       const pointsAfter=gameScores[pId]||0;
       const pointsEarned=result.correct?Math.max(0,pointsAfter-pointsBefore):0;
-      const extra={isGuess:true,guessResult:result.correct?'correct':'wrong',filledBy:pId,colorHex:pColor,points:pointsEarned};
-      if (state.activeLobbyCode) sendGameChatFB(state.activeLobbyCode,{name:state.playerName,colorHex:pColor,text,ts:Date.now(),avatar:state.pixelAvatarData||null,...extra});
+      const extra={isGuess:true,guessResult:result.correct?'correct':'wrong',filledBy:pId,playerId:pId,colorHex:pColor,points:pointsEarned};
+      const msgData={name:state.playerName,colorHex:pColor,text,ts:Date.now(),avatar:state.pixelAvatarData||null,...extra};
+      if (state.activeLobbyCode) sendGameChatFB(state.activeLobbyCode,msgData);
+      
       setTimeout(()=>{ if (sendBtn) sendBtn.disabled=false; },300);
       return;
     }
   }
-  if (state.activeLobbyCode) sendGameChatFB(state.activeLobbyCode,{name:state.playerName,colorHex:pColor,text,ts:Date.now(),avatar:state.pixelAvatarData||null});
+  if (state.activeLobbyCode) sendGameChatFB(state.activeLobbyCode,{name:state.playerName,colorHex:pColor,text,ts:Date.now(),avatar:state.pixelAvatarData||null,...(window._spectateMode?{isSpectator:true}:{})});
   setTimeout(()=>{ if (sendBtn) sendBtn.disabled=false; },300);
 }
 
@@ -1253,9 +1983,9 @@ function renderGameChatMessages(list) {
   Array.from(container.children).forEach(ch=>{ if (ch.id!=='game-chat-empty') ch.remove(); });
   list.forEach(m=>{
     // FIX 3/4: in versus mode, hide other players' guesses from everyone
-    if (window._gameMode==='versus'&&m.isGuess&&(m.filledBy||m.playerId)!==state.myPlayerId) return;
-    // FIX 3/4: in versus mode, don't apply other players' correct guesses to this player's board
-    if (m.isGuess&&m.guessResult==='correct'&&m.filledBy!==state.myPlayerId&&window._gameMode!=='versus') {
+    if ((window._gameMode==='versus'||window._gameMode==='ranked')&&m.isGuess&&m.guessResult==='correct'&&(m.filledBy||m.playerId)!==state.myPlayerId) return;
+    if (!window._spectateMode&&m.isSpectator) return;
+    if (m.isGuess&&m.guessResult==='correct'&&m.filledBy!==state.myPlayerId&&window._gameMode!=='versus'&&window._gameMode!=='ranked') {
       const parsed=parsePrefixedGuess(m.text||'');
       if (parsed) {
         const word=gameWords.find(w=>w.num===parsed.num&&w.dir===parsed.dir);
@@ -1356,7 +2086,7 @@ function stopCursorTracking() {
 
 // ── Versus grid preview ──
 function pushVersusGridState() {
-  if (!state.activeLobbyCode||!state.myPlayerId||window._gameMode!=='versus'||!gameGrid||!currentMap) return;
+  if (!state.activeLobbyCode||!state.myPlayerId||(window._gameMode!=='versus'&&window._gameMode!=='ranked')||!gameGrid||!currentMap) return;
   if (_versusGridPushTimer) clearTimeout(_versusGridPushTimer);
   _versusGridPushTimer=setTimeout(()=>{
     if (!gameGrid||!currentMap) return;
@@ -1388,6 +2118,8 @@ function startVersusGridPreview() {
     let anyOther=false;
     Object.entries(data).forEach(([id,grid])=>{
       if (id===state.myPlayerId||!grid?.cells||!grid.size) return;
+      // Only show players who are currently in this lobby — filter out stale entries from previous games
+      if (!state.lastKnownPlayers[id]) return;
       anyOther=true;
       const name=grid.name||state.lastKnownPlayers[id]?.name||'Player';
       const colorHex=grid.colorHex||state.lastKnownPlayers[id]?.colorHex||'#888';
@@ -1395,6 +2127,7 @@ function startVersusGridPreview() {
       const maxWidth=130, cellPx=Math.max(2,Math.floor(maxWidth/size)), totalPx=cellPx*size;
       const playerDiv=document.createElement('div');
       playerDiv.className='versus-preview-player';
+      playerDiv.dataset.playerId = id;
       playerDiv.style.cssText=`background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:8px;box-sizing:border-box;overflow:hidden;`;
       const miniGrid=document.createElement('div');
       miniGrid.className='versus-mini-grid';
@@ -1408,8 +2141,8 @@ function startVersusGridPreview() {
           cell.style.background='#1a1a1a';
           cell.style.border='none';
         } else if (v===3) {
-          cell.style.background=autocheckEnabled?'#27ae60':'#666666';
-          cell.style.border='0.5px solid #555';
+          cell.style.background='#27ae60';
+          cell.style.border='0.5px solid #1e8449';
         } else if (v===2) {
           cell.style.background='#666666';
           cell.style.border='0.5px solid #555';
@@ -1427,6 +2160,18 @@ function startVersusGridPreview() {
       nameDiv.style.cssText=`color:${colorHex};font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;text-align:center;max-width:${totalPx+20}px;`;
       nameDiv.textContent=name;
       playerDiv.appendChild(avatar); playerDiv.appendChild(miniGrid); playerDiv.appendChild(nameDiv);
+
+      // Add spectate eyeball button immediately if in spectate mode
+      if (window._spectateMode) {
+        const isSelected = spectateState.targetId !== null && id === spectateState.targetId;
+        const eyeBtn = document.createElement('button');
+        eyeBtn.className = 'spectate-eye-btn';
+        eyeBtn.style.cssText = 'margin-top:2px;background:transparent;border:1px solid var(--border2);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;color:var(--text3);font-family:inherit';
+        eyeBtn.textContent = isSelected ? '👁 Watching' : '👁';
+        eyeBtn.addEventListener('click', e => { e.stopPropagation(); spectatePlayer(id); });
+        playerDiv.appendChild(eyeBtn);
+      }
+
       wrap.appendChild(playerDiv);
     });
     if (!anyOther) {
@@ -1437,10 +2182,20 @@ function startVersusGridPreview() {
       wrap.appendChild(w);
     }
     wrap.style.display='';
+    if (window._spectateMode) {
+      wrap.querySelectorAll('.versus-preview-player').forEach(div => {
+        const isSelected = spectateState.targetId !== null && div.dataset.playerId === spectateState.targetId;
+        div.style.outline     = isSelected ? '2px solid rgba(212,160,23,0.7)' : 'none';
+        div.style.background  = isSelected ? 'rgba(212,160,23,0.06)'          : 'var(--bg3)';
+        div.style.borderColor = isSelected ? 'rgba(212,160,23,0.7)'           : 'var(--border)';
+        const eyeBtn = div.querySelector('.spectate-eye-btn');
+        if (eyeBtn) eyeBtn.textContent = isSelected ? '👁 Watching' : '👁';
+      });
+    }
   });
   setTimeout(() => pushVersusGridState(), 100);
   setTimeout(() => pushVersusGridState(), 500);
-  setInterval(() => { if (window._gameMode === 'versus') pushVersusGridState(); }, 500);
+  setInterval(() => { if (window._gameMode === 'versus' || window._gameMode === 'ranked') pushVersusGridState(); }, 500);
 }
 
 function stopVersusGridPreview() {
@@ -1453,6 +2208,9 @@ function stopVersusGridPreview() {
 // ── Game over ──
 function showGameOver() {
   if ((autocheckEnabled||chatGuessMode)&&state.isHost) recomputeScores();
+  // Ensure game over is always on top of elimination overlays etc.
+  const goEl = document.getElementById('game-over-overlay');
+  if (goEl) goEl.style.zIndex = '9999';
   const meId=state.myPlayerId;
   const knownIds=new Set(Object.keys(state.lastKnownPlayers));
   if (meId) knownIds.add(meId);
@@ -1462,7 +2220,8 @@ function showGameOver() {
   const podium=document.getElementById('game-over-podium');
   podium.innerHTML='';
   const topScore=sorted.length?sorted[0][1]:0;
-  const isTogetherMode=window._gameMode!=='versus';
+  const isRanked = window._gameMode==='ranked';
+  const isTogetherMode = window._gameMode!=='versus' && !isRanked;
   const winnerAvatarEl=document.getElementById('game-over-winner-avatar');
   if (winnerAvatarEl) {
     if (isTogetherMode) { winnerAvatarEl.style.display='none'; }
@@ -1507,6 +2266,10 @@ function showGameOver() {
         subtitleEl.textContent=`${topP.name} scored the most points`;
       } else { subtitleEl.textContent=''; }
     }
+  } else if (isRanked) {
+    const winner = sorted.find(([id]) => !_rankedEliminatedPlayers.has(id));
+    if (titleEl) titleEl.textContent = winner ? `${state.lastKnownPlayers[winner[0]]?.name||'A player'} wins!` : 'Race the Clock ended';
+    if (subtitleEl) subtitleEl.textContent = `Game lasted ${timeStr}`;
   } else {
     if (titleEl) titleEl.textContent='Game Ended';
     if (subtitleEl) subtitleEl.textContent=`Completed in ${timeStr}`;
@@ -1519,6 +2282,9 @@ function stopAllListeners() {
   clearInterval(gameTimerInterval);
   clearInterval(window._timerResyncInterval);
   stopCursorTracking();
+  stopRankedElimination();
+  clearInterval(window._rankedClockPoll);
+  if (_stopRankedSync) { _stopRankedSync(); _stopRankedSync = null; }
   if (_stopGameChat)     { _stopGameChat();     _stopGameChat     = null; }
   if (_stopCellSync)     { _stopCellSync();     _stopCellSync     = null; }
   if (_stopGameSettings) { _stopGameSettings(); _stopGameSettings = null; }
@@ -1651,6 +2417,13 @@ async function gameCtxAction(action) {
   if (action==='kick') {
     removePlayer(state.activeLobbyCode,_gameCtxTargetId).catch(()=>{});
     if (state.lastKnownPlayers[_gameCtxTargetId]) { state.lastKnownPlayers[_gameCtxTargetId]._kicked=true; state.lastKnownPlayers[_gameCtxTargetId]._disconnected=false; }
+    if (window._gameMode === 'ranked' && window._fb && state.activeLobbyCode) {
+      _rankedSpectatorIds.add(_gameCtxTargetId);
+      const { update, ref, db } = window._fb;
+      update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings/rankedSpectators`), {
+        [_gameCtxTargetId]: true
+      }).catch(() => {});
+    }
     renderGameScores(); showToast('Player kicked.');
   } else if (action==='giveHost') {
     transferHost(state.activeLobbyCode,_gameCtxTargetId,state.myPlayerId).then(()=>{
@@ -1737,7 +2510,7 @@ function init() {
   // Load puzzle from sessionStorage (set by lobby or home controller)
 console.log('[GAME INIT] dateKey from sessionStorage:', sessionStorage.getItem('puzzleDateKey'), 'isHost:', state.isHost);
 const gameMode   = sessionStorage.getItem('gameMode') || 'together';
-const puzzleJson = gameMode === 'versus' ? null : sessionStorage.getItem('soloPuzzle');
+const puzzleJson = (gameMode === 'versus' || gameMode === 'ranked') ? null : sessionStorage.getItem('soloPuzzle');
 
 if (!puzzleJson) {
     // Multiplayer: fetch puzzle from Firebase startedAt key

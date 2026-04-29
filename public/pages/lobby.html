@@ -210,13 +210,17 @@
             </div>
             <div style="position:relative;border-radius:0 0 10px 10px;overflow:hidden">
               <div id="lobby-mode-selector" style="display:grid;grid-template-columns:1fr 1fr;gap:0">
-                <div id="mode-card-together" style="background:var(--bg2);border-right:0.5px solid var(--border);border-top:2px solid transparent;padding:12px 14px 16px;cursor:pointer;transition:background .15s">
+                <div id="mode-card-together" style="background:var(--bg2);border-right:0.5px solid var(--border);border-bottom:0.5px solid var(--border);border-top:2px solid transparent;padding:12px 14px 16px;cursor:pointer;transition:background .15s">
                   <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px">Play Together</div>
                   <div style="font-size:12px;color:var(--text2);line-height:1.4;opacity:0.6">Collaborate to fill the grid as a team.</div>
                 </div>
-                <div id="mode-card-versus" style="background:var(--bg2);border-top:2px solid transparent;padding:12px 14px 16px;cursor:pointer;transition:background .15s">
+                <div id="mode-card-versus" style="background:var(--bg2);border-bottom:0.5px solid var(--border);border-top:2px solid transparent;padding:12px 14px 16px;cursor:pointer;transition:background .15s">
                   <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px">Versus</div>
                   <div style="font-size:12px;color:var(--text2);line-height:1.4;opacity:0.6">Race to complete the puzzle first. Your grid is private.</div>
+                </div>
+                <div id="mode-card-ranked" style="background:var(--bg2);border-right:0.5px solid var(--border);border-top:2px solid transparent;padding:12px 14px 16px;cursor:pointer;transition:background .15s;grid-column:1">
+                  <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px">Ranked</div>
+                  <div style="font-size:12px;color:var(--text2);line-height:1.4;opacity:0.6">Race against the clock. Lowest scorer eliminated every 2 minutes.</div>
                 </div>
               </div>
               <div id="mode-missing-overlay" style="display:none;position:absolute;inset:0;background:rgba(20,20,20,0.72);border-radius:8px;backdrop-filter:blur(2px);z-index:11;align-items:center;justify-content:center;flex-direction:column;gap:5px;pointer-events:none">

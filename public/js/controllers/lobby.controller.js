@@ -646,17 +646,26 @@ function renderStartBtn() {
   if (votedC) votedC.textContent = votedPlayers;
   if (totalC) totalC.textContent = totalPlayers;
 
-  if (data && data.status === 'started' && data.puzzleDateKey) {
+  const allPlayersInLobby = Object.values(state.lastKnownPlayers).every(p => !p.inGame);
+  if (data && data.status === 'started' && data.puzzleDateKey && !allPlayersInLobby) {
     const gameIsEnded = data.gameSettings?.gameEnded === true;
     if (!gameIsEnded) {
-      wrap.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <button class="btn-primary" id="join-active-btn" style="width:100%;justify-content:center">Join active match →</button>
-          ${state.isHost ? `<button class="btn-ghost" id="lobby-forfeit-active-btn" style="width:100%;justify-content:center;font-size:12px;background:#e05151;border-color:#e05151;color:var(--bg)">Forfeit game</button>` : ''}
-          <span style="font-size:12px;color:var(--text3)">A game is currently in progress<span id="game-progress-dots"></span></span>
-        </div>`;
-      document.getElementById('join-active-btn')?.addEventListener('click', joinActiveMatch);
-      document.getElementById('lobby-forfeit-active-btn')?.addEventListener('click', () => {
+      if (!document.getElementById('join-active-btn')) {
+        wrap.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:stretch;gap:8px">
+              <button id="join-active-btn" style="justify-content:center;background:#2a2a2a;color:#ccc;border-radius:8px;padding:8px 16px;font-size:13px;font-family:inherit;font-weight:600;cursor:pointer;letter-spacing:.01em;border:1.5px solid rgba(210,210,210,0);animation:join-btn-pulse 1.8s ease-in-out infinite;">
+                Join active match<span id="join-active-dots" style="display:inline-block;width:1.4em;text-align:left;vertical-align:bottom;font-size:1em;letter-spacing:0.06em;line-height:inherit;margin-bottom:0.0em"></span>
+              </button>
+              <style>
+                @keyframes join-btn-pulse { 0%,100%{border-color:rgba(210,210,210,0.7)} 50%{border-color:rgba(210,210,210,0)} }
+              </style>
+              ${state.isHost ? `<button id="lobby-forfeit-active-btn" class="btn-ghost" style="flex-shrink:0;font-size:13px;color:#e05151;border-color:rgba(224,81,81,0.5);">Forfeit</button>` : ''}
+            </div>
+          </div>`;
+        document.getElementById('join-active-btn')?.addEventListener('click', joinActiveMatch);
+        startDots('join-active-dots', 'joinActiveDots');
+        document.getElementById('lobby-forfeit-active-btn')?.addEventListener('click', () => {
         if (!state.activeLobbyCode || !window._fb) return;
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
@@ -681,6 +690,7 @@ function renderStartBtn() {
       });
       startDots('game-progress-dots', 'gameProgress');
       setGameInProgressLock();
+      } // end if !join-active-btn
       return;
     }
   }
@@ -690,8 +700,10 @@ function renderStartBtn() {
   if (!state.isHost) {
     wrap.innerHTML = `
       <div style="display:flex;flex-direction:column;gap:8px">
-        <p style="font-size:13px;color:#999;margin:0">Waiting for the host to start<span id="host-start-dots"></span></p>
-        <span style="font-size:12px;color:${allVoted?'#27ae60':'#e05151'}">${votedPlayers}/${totalPlayers} players voted<span id="voted-dots" style="color:${allVoted?'#27ae60':'#e05151'}"></span></span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <p style="font-size:13px;color:#999;margin:0">Waiting for host<span id="host-start-dots"></span></p>
+          <span style="font-size:12px;color:${allVoted?'#27ae60':'#e05151'}">&nbsp;&nbsp;${votedPlayers}/${totalPlayers} players voted<span id="voted-dots" style="color:${allVoted?'#27ae60':'#e05151'}"></span></span>
+        </div>
       </div>`;
     startDots('host-start-dots', 'hostStart');
     if (document.getElementById('voted-dots')) startDots('voted-dots', 'votedDots');
@@ -706,15 +718,19 @@ function renderStartBtn() {
   const startStyle     = startDisabled ? ' style="opacity:0.45;cursor:not-allowed"' : '';
 
   const gameActive = data && data.status === 'started' && !(data.gameSettings?.gameEnded);
+  const showPull = inGamePlayers.length > 0;
+  const showForfeit = false;
   wrap.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">
         <button class="btn-primary" id="start-game-btn"${startStyle}>Start game →</button>
-        ${gameActive ? `<button class="btn-ghost" id="lobby-forfeit-btn" style="font-size:12px;color:#e05151;border-color:#e05151">End game</button>` : ''}
+        ${showPull ? `<button class="btn-ghost" id="pull-players-btn" title="Pull players back to lobby" style="font-size:12px;color:#e05151;border-color:rgba(224,81,81,0.5);padding:7px 10px;display:flex;align-items:center;gap:5px;"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transform:scaleX(-1)"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>` : ''}
+        ${showForfeit ? `<button class="btn-ghost" id="lobby-forfeit-btn" style="font-size:12px;color:#e05151;border-color:#e05151">End game</button>` : ''}
       </div>
-      
-      <span style="font-size:12px;color:${allVoted?'#27ae60':'#e05151'}">${votedPlayers}/${totalPlayers} players voted<span id="voted-dots" style="color:${allVoted?'#27ae60':'#e05151'}"></span></span>
-      ${inGamePlayers.length > 0 ? `<span style="font-size:12px;color:#e05151;">Waiting for ${inGamePlayers.length} player${inGamePlayers.length>1?'s':''} to return<span id="return-dots"></span></span>` : ''}
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:12px;color:${allVoted?'#27ae60':'#e05151'}">${votedPlayers}/${totalPlayers} players voted<span id="voted-dots" style="color:${allVoted?'#27ae60':'#e05151'}"></span></span>
+        ${inGamePlayers.length > 0 ? `<span style="font-size:12px;color:#e05151;">&nbsp;&nbsp;Waiting for ${inGamePlayers.length} player${inGamePlayers.length>1?'s':''}<span id="return-dots"></span></span>` : ''}
+      </div>
     </div>`;
 
   document.getElementById('start-game-btn')?.addEventListener('click', () => {
@@ -751,6 +767,36 @@ if (modeOverlay) { modeOverlay.style.pointerEvents = 'all'; modeOverlay.style.di
     const { update, ref, db } = window._fb;
     update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), { gameEnded: true }).catch(() => {});
     showToast('Game ended.');
+  });
+  document.getElementById('pull-players-btn')?.addEventListener('click', () => {
+    if (!state.activeLobbyCode || !window._fb) return;
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+    overlay.innerHTML = `
+      <div style="background:var(--card-bg);border:0.5px solid var(--border2);border-radius:14px;padding:28px 28px 24px;max-width:320px;width:90%;display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:15px;font-weight:700;color:var(--text)">Pull players from game?</div>
+        <div style="font-size:13px;color:var(--text3);line-height:1.5">This will return all players to the lobby immediately.</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
+          <button id="pull-players-cancel" class="btn-ghost" style="font-size:13px">Cancel</button>
+          <button id="pull-players-confirm" style="font-size:13px;padding:7px 16px;background:#e05151;color:var(--bg);border:none;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600;display:flex;align-items:center;gap:6px;"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="transform:scaleX(-1)"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Pull</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#pull-players-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#pull-players-confirm').addEventListener('click', async () => {
+      overlay.remove();
+      if (!window._fb) return;
+      const { update, ref, db } = window._fb;
+      try {
+        const lobbyUpdates = { status: 'waiting', 'gameSettings/gameEnded': true, 'gameSettings/pullToLobby': Date.now() };
+        Object.keys(state.lastKnownPlayers).forEach(id => {
+          lobbyUpdates[`players/${id}/inGame`] = false;
+        });
+        await update(ref(db, `lobbies/${state.activeLobbyCode}`), lobbyUpdates);
+        showToast('Players pulled back to lobby.');
+      } catch { showToast('Could not pull players.'); }
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   });
 }
 
@@ -823,7 +869,6 @@ async function doStartGame() {
 
     const headerRight = document.createElement('span');
     headerRight.style.cssText = `font-size:10px;color:var(--text3,#666);letter-spacing:.08em;font-family:Inter,system-ui,sans-serif`;
-    headerRight.textContent = 'TIEBREAKER';
     cardHeader.appendChild(title);
     cardHeader.appendChild(headerRight);
     card.appendChild(cardHeader);
@@ -1141,6 +1186,8 @@ function enterLobbyScreen() {
 
   state.myVote = null;
   state.myVoteMeta = { size: 'standard', diff: 'medium' };
+  state._suppressGameRedirect = false;
+  state._lastKnownStartedAt = null;
   setIdentityLocked(false);
   document.querySelectorAll('.lobby-diff-btn').forEach(b => { b.style.opacity = ''; b.style.pointerEvents = ''; });
 
@@ -1324,27 +1371,57 @@ function subscribeLobbyFB() {
       if (existingOverlay) existingOverlay.remove();
     }
 
+    // Reset suppress flag when lobby returns to waiting
+    if (data.status === 'waiting') {
+      state._suppressGameRedirect = false;
+      state._suppressedAtStartedAt = null;
+    }
+    // Also lift suppression when gameEnded clears — means a fresh game is now live
+    const gameIsNowLive = data.status === 'started' && !data.gameSettings?.gameEnded;
+    if (state._suppressGameRedirect && gameIsNowLive && state._suppressedWhenGameEnded) {
+      state._suppressGameRedirect = false;
+    }
+    if (data.status === 'started' && data.gameSettings?.gameEnded) {
+      state._suppressedWhenGameEnded = true;
+    } else {
+      state._suppressedWhenGameEnded = false;
+    }
+    if (data.startedAt) state._lastKnownStartedAt = data.startedAt;
+
     // Game started — redirect to game.html
     if (data.status === 'started' && data.puzzleDateKey) {
       const gameIsEnded = data.gameSettings?.gameEnded === true;
       const returningFromGame = sessionStorage.getItem('returningFromGame') === '1';
+      console.log('[REDIRECT CHECK]', { status: data.status, gameIsEnded, returningFromGame, isHost: state.isHost, suppress: state._suppressGameRedirect, suppressedAt: state._suppressedAtStartedAt, dataStartedAt: data.startedAt, puzzleKey: data.puzzleDateKey, suppressedPuzzleKey: state._suppressedAtPuzzleKey });
       if (returningFromGame) {
         sessionStorage.removeItem('returningFromGame');
+        state._suppressedAtStartedAt = data.startedAt || null;
+        state._suppressedAtPuzzleKey = data.puzzleDateKey || null;
         state._suppressGameRedirect = true;
       }
-      if (state._suppressGameRedirect && data.status === 'waiting') {
+      if (state._suppressGameRedirect && data.startedAt && data.startedAt !== state._suppressedAtStartedAt) {
+        state._suppressGameRedirect = false;
+      }
+      // If suppress was set but startedAt is missing (serverTimestamp not yet resolved),
+      // treat a fresh puzzleDateKey change as a new game and lift suppression
+      if (state._suppressGameRedirect && !data.startedAt && data.puzzleDateKey && data.puzzleDateKey !== state._suppressedAtPuzzleKey) {
         state._suppressGameRedirect = false;
       }
       if (!gameIsEnded && !state.isHost && !returningFromGame && !state._suppressGameRedirect) {
         const puzzleKey = data.pendingPuzzleDateKey || data.puzzleDateKey;
-        console.log('[REDIRECT] pendingPuzzleDateKey:', data.pendingPuzzleDateKey, '| puzzleDateKey:', data.puzzleDateKey, '| using:', puzzleKey);
+        console.log('[REDIRECT] pendingPuzzleDateKey:', data.pendingPuzzleDateKey, '| puzzleDateKey:', data.puzzleDateKey, '| using:', puzzleKey, '| gameMode:', data.gameMode);
         if (!puzzleKey) {
           console.warn('[REDIRECT] status=started but no puzzleKey yet, waiting for next snapshot...');
+          return;
+        }
+        if (!data.gameMode) {
+          console.warn('[REDIRECT] status=started but no gameMode yet, waiting for next snapshot...');
           return;
         }
         sessionStorage.setItem('gameMode', data.gameMode || 'together');
         sessionStorage.setItem('puzzleDateKey', puzzleKey);
         sessionStorage.removeItem('returningFromGame');
+        sessionStorage.removeItem('freshGameStart');
         window.location.href = 'game.html';
         return;
       }

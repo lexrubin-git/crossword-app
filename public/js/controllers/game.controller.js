@@ -53,6 +53,7 @@ const RANKED_INTERVAL_SEC = 120;
 let _rankedEliminationTimer = null;
 let _rankedCountdownTimer = null;
 let _rankedNextElimSec = 0;
+let _rankedNextElimAt = 0;
 let _rankedEliminatedPlayers = new Set();
 let _rankedSpectatorIds = new Set();   // players who joined mid-match as spectators
 let _stopRankedSync = null;
@@ -61,6 +62,7 @@ let _rankedCycleNumber = 0;            // how many elimination rounds have fired
 let _rankedCycleWordsCorrect = 0;      // words THIS player got correct this cycle (local count, includes carry-over)
 let _rankedCarryOver = 0;              // words carried over from previous cycle for this player
 let _rankedPlayerCycleWords = {};      // { [playerId]: wordsThisCycle } — written to FB by each client, read by host
+let _rankedPlayerCarryOvers = {};      // { [playerId]: carryOver } — baseline at start of each round
 
 async function _checkAllPlayersSafe() {
   if (!state.isHost || !state.activeLobbyCode || !window._fb) return;
@@ -71,9 +73,38 @@ async function _checkAllPlayersSafe() {
     !_rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id)
   );
   if (active.length === 0) return;
-  const allSafe = active.every(id => (cycleWords[id] || 0) >= 3);
+  const allSafe = active.every(id => (cycleWords[id] || 0) >= (_rankedPlayerCarryOvers[id] || 0) + 3);
   if (allSafe && _rankedNextElimSec > 5) {
     const newAt = Date.now() + 5000;
+    _rankedNextElimAt = newAt;
+    // Cancel ALL existing timers — countdown, elimination interval, and first-fire timeout
+    clearInterval(_rankedCountdownTimer);
+    clearInterval(_rankedEliminationTimer);
+    clearTimeout(window._rankedFirstTimeout);
+    _rankedCountdownTimer = null;
+    _rankedEliminationTimer = null;
+    window._rankedFirstTimeout = null;
+    // Restart countdown display for the shortened 5s window
+    _rankedNextElimSec = 5;
+    _rankedCountdownTimer = setInterval(() => {
+      _rankedNextElimSec = Math.max(0, Math.round((_rankedNextElimAt - Date.now()) / 1000));
+      const el = document.getElementById('ranked-countdown');
+      if (el) {
+        const m = Math.floor(_rankedNextElimSec / 60), s2 = _rankedNextElimSec % 60;
+        el.textContent = `${m}:${s2 < 10 ? '0' : ''}${s2}`;
+        el.style.color = '#e05151';
+        el.style.animation = 'rankedPulse .6s ease-in-out infinite';
+      }
+      renderRankedHUD();
+    }, 1000);
+    window._rankedFirstTimeout = setTimeout(async () => {
+      clearInterval(_rankedCountdownTimer);
+      _rankedCountdownTimer = null;
+      await doRankedElimination();
+      _rankedEliminationTimer = setInterval(async () => {
+        await doRankedElimination();
+      }, RANKED_INTERVAL_SEC * 1000);
+    }, 5000);
     await update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
       rankedNextElimAt: newAt,
     }).catch(() => {});
@@ -127,27 +158,27 @@ function renderRankedHUD() {
     }
     const m = Math.floor(_rankedNextElimSec/60), s = _rankedNextElimSec%60;
     const urgent = _rankedNextElimSec <= 10;
-    const cycleWords = Math.min(3, _rankedCycleWordsCorrect);
-    const isSafe = cycleWords >= 3;
-    hud.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="${urgent?'#e05151':'var(--text3)'}" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l3 3"/></svg><span id="ranked-countdown" style="font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;color:${urgent?'#e05151':'var(--text)'}${urgent?';animation:rankedPulse .6s ease-in-out infinite':''}">${m}:${s<10?'0':''}${s}</span><div style="width:1px;height:16px;background:rgba(224,81,81,0.3)"></div><span style="font-size:11px;font-weight:700;color:${isSafe?'#27ae60':'#e05151'}">${isSafe?'✓ safe':`${cycleWords}/3`}</span>`;
+    const cycleWords = _rankedCycleWordsCorrect;
+    const wordsThisRound = cycleWords - _rankedCarryOver;
+    const isSafe = wordsThisRound >= 3;
+    hud.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="${urgent?'#e05151':'var(--text3)'}" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l3 3"/></svg><span id="ranked-countdown" style="font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;color:${urgent?'#e05151':'var(--text)'}${urgent?';animation:rankedPulse .6s ease-in-out infinite':''}">${m}:${s<10?'0':''}${s}</span><div style="width:1px;height:16px;background:rgba(224,81,81,0.3)"></div><span style="font-size:11px;font-weight:700;color:${isSafe?'#27ae60':'#e05151'}">${isSafe?`✓ (${wordsThisRound}/3)`:`${wordsThisRound}/3`}</span>`;
     return;
   }
 
-  // In ranked mode, hide the logo and inject the HUD in its place
-  const logoEl = document.querySelector('.game-sidebar img[alt="Logo"]');
-  if (logoEl && !logoEl.dataset.rankedHidden) {
-    logoEl.dataset.rankedHidden = '1';
-    logoEl.style.display = 'none';
-  }
-  const logoParent = logoEl?.parentElement;
+  // In ranked mode, hide the mode card and inject the HUD in its place
+  const modeCardToHide = document.getElementById('sidebar-mode-card');
+  if (modeCardToHide) modeCardToHide.style.display = 'none';
+  const logoEl = null;
+  const logoParent = null;
 
   let hud = document.getElementById('ranked-hud');
   if (!hud) {
     hud = document.createElement('div');
     hud.id = 'ranked-hud';
-    hud.style.cssText = 'border-radius:12px;overflow:hidden;';
-    if (logoParent && logoEl) {
-      logoParent.insertBefore(hud, logoEl.nextSibling);
+    hud.style.cssText = 'border-radius:12px;overflow:hidden;margin-bottom:12px;';
+    const modeCardSlot = document.getElementById('sidebar-mode-card');
+    if (modeCardSlot && modeCardSlot.parentElement) {
+      modeCardSlot.parentElement.insertBefore(hud, modeCardSlot);
     } else {
       cluePanel.insertBefore(hud, cluePanel.firstChild);
     }
@@ -155,13 +186,26 @@ function renderRankedHUD() {
 
   const m = Math.floor(_rankedNextElimSec/60), s = _rankedNextElimSec%60;
   const urgent = _rankedNextElimSec <= 10;
-  const cycleWords = Math.min(3, _rankedCycleWordsCorrect);
-  const isSafe = cycleWords >= 3;
+  const wordsThisRound = Math.max(0, _rankedCycleWordsCorrect - _rankedCarryOver);
+  const isSafe = wordsThisRound >= 3;
   const gainColor = isSafe ? '#27ae60' : '#e05151';
   const timerColor = urgent ? '#e05151' : 'var(--text)';
 
+  // Find the next player at risk (lowest cycle words among active players, excluding self)
+  const activeForHUD = Object.entries(state.lastKnownPlayers)
+    .filter(([id]) => !_rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id))
+    .map(([id, p]) => ({
+      id, name: p.name || 'Player',
+      cw: Math.max(0, (_rankedPlayerCycleWords[id] || 0) - (_rankedPlayerCarryOvers[id] || 0))
+    }))
+    .sort((a, b) => a.cw !== b.cw ? a.cw - b.cw : a.id.localeCompare(b.id));
+  const atRisk = activeForHUD[0] || null;
+  const atRiskColor = atRisk ? (state.lastKnownPlayers[atRisk.id]?.colorHex || '#e05151') : '#e05151';
+  const atRiskName = atRisk ? atRisk.name : '—';
+
   const cardBg = isSafe ? 'rgba(39,174,96,0.1)' : 'rgba(224,81,81,0.07)';
   const cardBorder = isSafe ? 'rgba(39,174,96,0.45)' : 'rgba(224,81,81,0.28)';
+  const roundNum = _rankedCycleNumber + 1;
   hud.innerHTML = `
     <div style="background:${cardBg};border:1.5px solid ${cardBorder};border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
@@ -170,13 +214,15 @@ function renderRankedHUD() {
           <span id="ranked-countdown" style="font-size:22px;font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:-0.5px;color:${timerColor}${urgent?';animation:rankedPulse .6s ease-in-out infinite':''}">${m}:${s<10?'0':''}${s}</span>
         </div>
         <div style="display:flex;align-items:center;gap:5px;font-size:13px;font-weight:800;color:${gainColor};background:${isSafe?'rgba(39,174,96,0.2)':'rgba(224,81,81,0.12)'};border:1px solid ${isSafe?'rgba(39,174,96,0.5)':'rgba(224,81,81,0.35)'};border-radius:7px;padding:4px 9px;">
-          ${isSafe ? '✓ safe' : `${cycleWords}/3`}
+          ${isSafe ? `✓ safe (${wordsThisRound}/3)` : `${wordsThisRound}/3`}
         </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        <div><span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;background:rgba(224,81,81,0.15);border:1px solid #e05151;color:#e05151;letter-spacing:.05em;text-transform:uppercase;vertical-align:middle">Race the Clock</span></div>
-        <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.04em;">Get 3 words each round to survive</div>
+      <div style="height:1px;background:rgba(255,255,255,0.08);margin:0 -2px;"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+        <span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.25);color:rgba(255,255,255,0.75);letter-spacing:.05em;text-transform:uppercase;">Race the Clock</span>
+        <span style="font-size:10px;font-weight:800;color:var(--text3);letter-spacing:.04em;white-space:nowrap;">Round ${roundNum}</span>
       </div>
+      <div style="font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.04em;">Next out: <span style="color:${atRiskColor};font-weight:800">${atRiskName}</span></div>
     </div>`;
 }
 
@@ -239,7 +285,6 @@ function showNoEliminationBanner() {
     wrap.style.cssText = `position:fixed;z-index:8000;pointer-events:none;display:flex;align-items:center;justify-content:center;left:${gridRect.left}px;top:${gridRect.top}px;width:${gridRect.width}px;height:${gridRect.height}px;`;
   }
   wrap.innerHTML = `<div class="ranked-elim-card" style="border-color:#d4a017;box-shadow:0 0 60px rgba(212,160,23,0.35)">
-    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#d4a017" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
     <div style="font-size:15px;font-weight:800;color:#d4a017">No players eliminated</div>
     <div style="font-size:12px;color:var(--text3)">Everyone advances to the next round</div>
   </div>`;
@@ -262,20 +307,37 @@ async function doRankedElimination() {
   const cycleWords = cwSnap ? (cwSnap.val() || {}) : {};
 
   // Players who got fewer than 3 words this cycle (carry-over already baked into their count)
-  const victims = active.filter(p => (cycleWords[p.id] || 0) < 3);
+  const victims = active.filter(p => (cycleWords[p.id] || 0) < (_rankedPlayerCarryOvers[p.id] || 0) + 3);
 
   if (victims.length === 0 || victims.length === active.length) {
     // Everyone safe OR everyone failed — no elimination, roll to next round
     const carryOvers = {};
-    active.forEach(p => { carryOvers[p.id] = Math.max(0, (cycleWords[p.id] || 0) - 3); });
+    active.forEach(p => { carryOvers[p.id] = Math.max(0, (cycleWords[p.id] || 0) - ((_rankedPlayerCarryOvers[p.id] || 0) + 3)); });
     const nextAt = Date.now() + RANKED_INTERVAL_SEC * 1000;
+    _rankedNextElimAt = nextAt;
     const newCycleWords = {};
     active.forEach(p => { newCycleWords[p.id] = carryOvers[p.id] || 0; });
     await update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
       rankedNextElimAt: nextAt,
       rankedNoElimAt: Date.now(),
+      rankedCycleNumber: _rankedCycleNumber,
     }).catch(() => {});
     await update(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), newCycleWords).catch(() => {});
+    // Reset host's own local cycle count to their carry-over for the new round
+    const myCarryOver = newCycleWords[state.myPlayerId] || 0;
+    _rankedCarryOver = 0;
+    _rankedCycleWordsCorrect = myCarryOver;
+    // Host: populate carry-overs for all players so HUD sorts correctly
+    Object.entries(newCycleWords).forEach(([id, co]) => { _rankedPlayerCarryOvers[id] = 0; _rankedPlayerCycleWords[id] = co; });
+    // Explicitly sync self so score display is correct before Firebase re-fires
+    _rankedPlayerCycleWords[state.myPlayerId] = myCarryOver;
+    renderRankedHUD();
+    if (gameWords && gameGrid) {
+      gameWords.forEach(w => {
+        const fullyCorrect = w.cells.every((c, i) => gameGrid[c.row][c.col].letter === w.answer[i]);
+        if (fullyCorrect) { w.cells.forEach(c => { const el = getCellEl(c.row, c.col); if (el) { el.classList.add('correct', 'has-letter'); el.classList.remove('wrong'); } }); }
+      });
+    }
     return;
   }
 
@@ -283,7 +345,7 @@ async function doRankedElimination() {
   const carryOvers = {};
   active.forEach(p => {
     if (!victims.find(v => v.id === p.id)) {
-      carryOvers[p.id] = Math.max(0, (cycleWords[p.id] || 0) - 3);
+      carryOvers[p.id] = Math.max(0, (cycleWords[p.id] || 0) - ((_rankedPlayerCarryOvers[p.id] || 0) + 3));
     }
   });
 
@@ -301,6 +363,7 @@ async function doRankedElimination() {
   });
 
   const nextAt = Date.now() + RANKED_INTERVAL_SEC * 1000;
+  _rankedNextElimAt = nextAt;
   const lastVictim = finalVictims[finalVictims.length - 1];
   await update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
     rankedEliminated: [..._rankedEliminatedPlayers],
@@ -308,8 +371,24 @@ async function doRankedElimination() {
     rankedLastElimName: finalVictims.length > 1 ? finalVictims.map(v => v.name).join(' & ') : lastVictim.name,
     rankedLastElimColor: lastVictim.colorHex,
     rankedNextElimAt: nextAt,
+    rankedCycleNumber: _rankedCycleNumber,
   }).catch(() => {});
   await update(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), newCycleWords).catch(() => {});
+  // Reset host's own local cycle count to their carry-over for the new round
+  const myCarryOver = newCycleWords[state.myPlayerId] || 0;
+  _rankedCarryOver = 0;
+  _rankedCycleWordsCorrect = myCarryOver;
+  // Host: populate carry-overs for all players so HUD sorts correctly
+  Object.entries(newCycleWords).forEach(([id, co]) => { _rankedPlayerCarryOvers[id] = 0; _rankedPlayerCycleWords[id] = co; });
+  // Explicitly sync self so score display is correct before Firebase re-fires
+  _rankedPlayerCycleWords[state.myPlayerId] = myCarryOver;
+  renderRankedHUD();
+  if (gameWords && gameGrid) {
+    gameWords.forEach(w => {
+      const fullyCorrect = w.cells.every((c, i) => gameGrid[c.row][c.col].letter === w.answer[i]);
+      if (fullyCorrect) { w.cells.forEach(c => { const el = getCellEl(c.row, c.col); if (el) { el.classList.add('correct', 'has-letter'); el.classList.remove('wrong'); } }); }
+    });
+  }
 
   if (active.length - finalVictims.length <= 1) setTimeout(endRankedGame, 3600);
 }
@@ -329,10 +408,11 @@ function endRankedGame() {
 function startRankedElimination(nextElimAt) {
   stopRankedElimination();
   ensureRankedStyles();
+  _rankedNextElimAt = nextElimAt;
   _rankedNextElimSec = Math.max(0, Math.round((nextElimAt - Date.now()) / 1000));
   renderRankedHUD();
   _rankedCountdownTimer = setInterval(() => {
-    if (_rankedNextElimSec > 0) _rankedNextElimSec--;
+    _rankedNextElimSec = Math.max(0, Math.round((_rankedNextElimAt - Date.now()) / 1000));
     const urgent = _rankedNextElimSec <= 10;
     const el = document.getElementById('ranked-countdown');
     if (el) {
@@ -343,24 +423,33 @@ function startRankedElimination(nextElimAt) {
     }
     // Flash grid red for lowest-score player when countdown hits 10
     if (_rankedNextElimSec === 10) {
-      const lowest = getRankedLowestPlayer();
-      if (lowest?.id === state.myPlayerId) startRankedGridFlash();
+      const wordsThisRound = _rankedCycleWordsCorrect - _rankedCarryOver;
+      const myNotSafe = wordsThisRound < 3 && !_rankedEliminatedPlayers.has(state.myPlayerId) && !_rankedSpectatorIds.has(state.myPlayerId);
+      // Only flash if at least one other active player IS safe — meaning someone is actually at risk of elimination
+      const activePlayers = Object.keys(state.lastKnownPlayers).filter(id => !_rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id));
+      const anyOneSafe = activePlayers.some(id => {
+        const cw = id === state.myPlayerId
+          ? wordsThisRound
+          : Math.max(0, (_rankedPlayerCycleWords[id] || 0) - (_rankedPlayerCarryOvers[id] || 0));
+        return cw >= 3;
+      });
+      if (myNotSafe && anyOneSafe) {
+        startRankedGridFlash();
+      }
     }
     if (_rankedNextElimSec === 0) {
       stopRankedGridFlash();
       if (state.isHost) _rankedNextElimSec = RANKED_INTERVAL_SEC;
       // Non-hosts: carry-over is handled by subscribeRankedFB when rankedNextElimAt resets
     }
-    // Re-render full HUD every 5s or at key thresholds to keep "next out" name fresh
-    if (_rankedNextElimSec % 5 === 0 || _rankedNextElimSec === 10) renderRankedHUD();
+    // Re-render full HUD every tick to keep "next out" name fresh
+    renderRankedHUD();
   }, 1000);
   if (state.isHost) {
     const ms = Math.max(0, nextElimAt - Date.now());
     window._rankedFirstTimeout = setTimeout(async () => {
       await doRankedElimination();
       _rankedEliminationTimer = setInterval(async () => {
-        _rankedNextElimSec = RANKED_INTERVAL_SEC;
-        renderRankedHUD();
         await doRankedElimination();
       }, RANKED_INTERVAL_SEC * 1000);
     }, ms);
@@ -373,12 +462,9 @@ function stopRankedElimination() {
   _rankedEliminationTimer = null; _rankedCountdownTimer = null;
   stopRankedGridFlash();
   document.getElementById('ranked-hud')?.remove();
-  // Restore logo if it was hidden
-  const logoEl = document.querySelector('.game-sidebar img[alt="Logo"]');
-  if (logoEl && logoEl.dataset.rankedHidden) {
-    logoEl.style.display = '';
-    delete logoEl.dataset.rankedHidden;
-  }
+  // Restore mode card if it was hidden for ranked
+  const modeCard = document.getElementById('sidebar-mode-card');
+  if (modeCard) modeCard.style.display = '';
 }
 
 function startRankedGridFlash() {
@@ -555,15 +641,44 @@ function subscribeRankedFB() {
   if (!state.activeLobbyCode || !window._fb) return;
   const { onValue, ref, db } = window._fb;
   // Live-sync all players' cycle word counts for the score list
-  onValue(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), snap => {
+  const _stopCycleWordsSync = onValue(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), snap => {
     const data = snap.val() || {};
+    if (!snap.exists()) {
+      Object.keys(_rankedPlayerCycleWords).forEach(id => { _rankedPlayerCycleWords[id] = 0; });
+      Object.keys(_rankedPlayerCarryOvers).forEach(id => { _rankedPlayerCarryOvers[id] = 0; });
+      renderGameScores();
+      return;
+    }
     Object.entries(data).forEach(([id, count]) => {
-      _rankedPlayerCycleWords[id] = count || 0;
+      const newCount = count || 0;
+      if (id === state.myPlayerId) {
+        // Self display uses _rankedCycleWordsCorrect/_rankedCarryOver directly — skip FB update for self
+      } else if (newCount < (_rankedPlayerCycleWords[id] || 0) && (_rankedPlayerCycleWords[id] || 0) > 0) {
+        // Round reset detected for another player
+        _rankedPlayerCarryOvers[id] = 0;
+        _rankedPlayerCycleWords[id] = newCount;
+      } else {
+        _rankedPlayerCycleWords[id] = newCount;
+      }
     });
     renderGameScores();
     if (state.isHost) _checkAllPlayersSafe();
+    // Re-mark all correct cells green AND re-strikethrough completed clues after every FB update
+    if (gameWords && gameGrid) {
+      gameWords.forEach(w => {
+        const fullyCorrect = w.cells.every((c, i) => gameGrid[c.row][c.col].letter === w.answer[i]);
+        if (fullyCorrect) {
+          w.cells.forEach(c => {
+            const el = getCellEl(c.row, c.col);
+            if (el) { el.classList.add('correct', 'has-letter'); el.classList.remove('wrong'); }
+          });
+          const clueEl = document.getElementById(`clue-item-${w.dir}-${w.num}`);
+          if (clueEl) { clueEl.classList.add('completed'); const t = clueEl.querySelector('.game-clue-text'); if (t) t.style.textDecoration = 'line-through'; }
+        }
+      });
+    }
   });
-  _stopRankedSync = onValue(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), snap => {
+  const _stopGameSettingsRanked = onValue(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), snap => {
     const s = snap.val() || {};
     if (!window._rankedBannerShown) window._rankedBannerShown = new Set();
     (s.rankedEliminated || []).forEach(id => _rankedEliminatedPlayers.add(id));
@@ -582,23 +697,65 @@ function subscribeRankedFB() {
     if (s.rankedLastElimId && !window._rankedBannerShown.has(bannerKey)) {
       window._rankedBannerShown.add(bannerKey);
       const isMe = s.rankedLastElimId === state.myPlayerId;
-      showEliminationBanner(s.rankedLastElimName || 'A player', s.rankedLastElimColor || '#e05151', isMe);
+      // "You're out" full overlay should only ever show once per player per game
+      const meElimKey = 'me-eliminated';
+      if (!isMe || !window._rankedBannerShown.has(meElimKey)) {
+        if (isMe) window._rankedBannerShown.add(meElimKey);
+        showEliminationBanner(s.rankedLastElimName || 'A player', s.rankedLastElimColor || '#e05151', isMe);
+      }
       renderRankedHUD();
     }
     const noElimKey = 'noelim|' + (s.rankedNoElimAt || '');
     if (s.rankedNoElimAt && !window._rankedBannerShown.has(noElimKey)) {
       window._rankedBannerShown.add(noElimKey);
       showNoEliminationBanner();
+      // Re-mark correct cells green — no-elim round transition can strip the correct class
+      if (gameWords && gameGrid) {
+        gameWords.forEach(w => {
+          const fullyCorrect = w.cells.every((c, i) => gameGrid[c.row][c.col].letter === w.answer[i]);
+          if (fullyCorrect) {
+            w.cells.forEach(c => {
+              const el = getCellEl(c.row, c.col);
+              if (el) { el.classList.add('correct', 'has-letter'); el.classList.remove('wrong'); }
+            });
+          }
+        });
+      }
     }
     if (!state.isHost && s.rankedNextElimAt) {
+      _rankedNextElimAt = s.rankedNextElimAt;
+      // Apply round number immediately so HUD shows correct round before async fetch resolves
+      if (typeof s.rankedCycleNumber === 'number') {
+        _rankedCycleNumber = s.rankedCycleNumber;
+        renderRankedHUD();
+      }
       const newSec = Math.max(0, Math.round((s.rankedNextElimAt - Date.now()) / 1000));
+      const prevElimSec = _rankedNextElimSec;
       // If a new cycle just started (time jumped back up), pull carry-over from Firebase
-      if (newSec > _rankedNextElimSec + 10 && state.myPlayerId) {
+      if (newSec > prevElimSec + 10 && state.myPlayerId) {
         const { get, ref, db } = window._fb;
-        get(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords/${state.myPlayerId}`)).then(snap => {
-          _rankedCycleWordsCorrect = snap.exists() ? (snap.val() || 0) : 0;
-          _rankedCarryOver = _rankedCycleWordsCorrect;
+        get(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`)).then(snap => {
+          const allCycleWords = snap.exists() ? (snap.val() || {}) : {};
+          const myCarryOver = allCycleWords[state.myPlayerId] || 0;
+          // myCarryOver is already the new baseline (host wrote carry-over as new starting count)
+          _rankedCarryOver = 0;
+          _rankedCycleWordsCorrect = myCarryOver;
+          // Reset carry-over baseline for ALL players: their current count IS their new baseline
+          Object.keys(allCycleWords).forEach(id => {
+            _rankedPlayerCarryOvers[id] = 0;
+            _rankedPlayerCycleWords[id] = allCycleWords[id] || 0;
+          });
+          // Also reset any players not yet in allCycleWords
+          Object.keys(state.lastKnownPlayers).forEach(id => {
+            if (!(id in allCycleWords)) {
+              _rankedPlayerCarryOvers[id] = 0;
+              _rankedPlayerCycleWords[id] = 0;
+            }
+          });
+          // Explicitly sync self so score display is correct before Firebase re-fires
+          _rankedPlayerCycleWords[state.myPlayerId] = myCarryOver;
           renderRankedHUD();
+          renderGameScores();
         }).catch(() => {});
       }
       _rankedNextElimSec = newSec;
@@ -612,6 +769,7 @@ function subscribeRankedFB() {
       }
     }
   });
+  _stopRankedSync = () => { _stopCycleWordsSync(); _stopGameSettingsRanked(); };
 }
 
 // Cell element cache
@@ -684,6 +842,7 @@ function enterGame(map, gameMode) {
   _rankedCycleWordsCorrect = 0;
   _rankedCarryOver = 0;
   _rankedPlayerCycleWords = {};
+  _rankedPlayerCarryOvers = {};
   stopRankedElimination();
   if (_stopRankedSync) { _stopRankedSync(); _stopRankedSync = null; }
 
@@ -740,7 +899,11 @@ function enterGame(map, gameMode) {
   const startTimer = () => {
     clearInterval(gameTimerInterval);
     gameTimerInterval = setInterval(() => {
-      gameTimerSec++;
+      if (window._lastGameStartedAt) {
+        gameTimerSec = Math.max(0, Math.floor((Date.now() - window._lastGameStartedAt) / 1000));
+      } else {
+        gameTimerSec++;
+      }
       const m = Math.floor(gameTimerSec/60), s = gameTimerSec%60;
       const el = document.getElementById('game-timer');
       if (el) el.textContent = m+':'+(s<10?'0':'')+s;
@@ -758,12 +921,7 @@ function enterGame(map, gameMode) {
         gameTimerSec = 0;
       }
       startTimer();
-      // Re-sync every 30s to prevent drift
-      window._timerResyncInterval = setInterval(() => {
-        if (window._lastGameStartedAt) {
-          gameTimerSec = Math.max(0, Math.floor((Date.now() - window._lastGameStartedAt) / 1000));
-        }
-      }, 30000);
+      window._timerResyncInterval = null;
     }).catch(() => { gameTimerSec = 0; startTimer(); });
   } else {
     startTimer();
@@ -792,16 +950,22 @@ function enterGame(map, gameMode) {
       window._gridReady = true;
       applyChatGuessModeUI(false, false);
 
-      // Mode pill above scores
-      const scoreLabelEl = document.querySelector('#game-score-list')?.closest('[style*="border-radius:10px"]')?.previousElementSibling?.querySelector('.game-sidebar-label');
-      if (scoreLabelEl) {
-        const mode = window._gameMode;
-        const pillHtml = mode === 'ranked'
-          ? ' <span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;background:rgba(224,81,81,0.15);border:1px solid #e05151;color:#e05151;letter-spacing:.05em;text-transform:uppercase;vertical-align:middle;margin-left:5px">Race the Clock</span>'
-          : mode === 'versus'
-          ? ' <span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;background:rgba(255,255,255,0.08);border:1px solid var(--border2);color:var(--text2);letter-spacing:.05em;text-transform:uppercase;vertical-align:middle;margin-left:5px">Versus</span>'
-          : ' <span style="display:inline-block;padding:1px 7px;border-radius:8px;font-size:9px;font-weight:700;background:rgba(255,255,255,0.08);border:1px solid var(--border2);color:var(--text2);letter-spacing:.05em;text-transform:uppercase;vertical-align:middle;margin-left:5px">Together</span>';
-        scoreLabelEl.innerHTML = 'Scores' + pillHtml;
+      // Mode label card above scores
+      const modeCard = document.getElementById('sidebar-mode-card');
+      const modeLabelEl = document.getElementById('sidebar-mode-label');
+      const modeDescEl = document.getElementById('sidebar-mode-desc');
+      const mode = window._gameMode;
+      if (modeLabelEl) modeLabelEl.textContent = 'Current mode';
+      if (modeDescEl && modeCard) {
+        if (mode === 'ranked') {
+          modeCard.style.display = 'none'; // HUD replaces this in ranked
+        } else if (mode === 'versus') {
+          modeCard.style.display = '';
+          modeDescEl.innerHTML = '<span style="display:inline-block;padding:2px 9px;border-radius:8px;font-size:11px;font-weight:700;background:rgba(255,255,255,0.08);border:1px solid var(--border2);color:var(--text2);letter-spacing:.05em;text-transform:uppercase;margin-right:8px">Versus</span>Race to complete the grid first';
+        } else {
+          modeCard.style.display = '';
+          modeDescEl.innerHTML = '<span style="display:inline-block;padding:2px 9px;border-radius:8px;font-size:11px;font-weight:700;background:rgba(255,255,255,0.08);border:1px solid var(--border2);color:var(--text2);letter-spacing:.05em;text-transform:uppercase;margin-right:8px">Together</span>Collaborate to fill the grid';
+        }
       }
 
       // Show host toolbar (hidden in ranked mode)
@@ -846,7 +1010,7 @@ function enterGame(map, gameMode) {
             const firstAt = Date.now() + RANKED_INTERVAL_SEC * 1000;
             const { update, ref, db } = window._fb;
             update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), {
-              rankedNextElimAt: firstAt, rankedEliminated: [], rankedLastElimId: null,
+              rankedNextElimAt: firstAt, rankedEliminated: [], rankedLastElimId: null, rankedCycleNumber: 0,
             }).catch(()=>{});
             startRankedElimination(firstAt);
           } else {
@@ -899,12 +1063,9 @@ function enterGame(map, gameMode) {
         if (isRanked) {
           nhIndicator.style.display = 'none';
         } else if (isVersus) {
-          nhIndicator.style.display = '';
-          nhIndicator.innerHTML = '<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(255,255,255,0.1);border:1px solid var(--border2);color:var(--text);letter-spacing:.05em;text-transform:uppercase;vertical-align:middle">Versus</span>&nbsp; Race to complete the grid first — your grid is private';
+          nhIndicator.style.display = 'none';
         } else if (!state.isHost) {
-          nhIndicator.style.display = '';
-          nhIndicator.innerHTML = 'Mode: type into grid to guess';
-          nhIndicator.style.color = 'var(--text3)';
+          nhIndicator.style.display = 'none';
         } else {
           nhIndicator.style.display = 'none';
         }
@@ -936,7 +1097,7 @@ function enterGame(map, gameMode) {
   if (_stopGameSettings) { _stopGameSettings(); _stopGameSettings = null; }
 
   const _returningFromGame = sessionStorage.getItem('returningFromGame') === '1';
-  sessionStorage.removeItem('returningFromGame');
+  // Do NOT remove returningFromGame here — lobby.controller.js needs it to suppress redirect
   const _freshStart = sessionStorage.getItem('freshGameStart') === '1';
   sessionStorage.removeItem('freshGameStart');
   if (state.isHost && !window._isRejoin && !_returningFromGame && _freshStart) {
@@ -944,6 +1105,10 @@ function enterGame(map, gameMode) {
     pushGameSettingFB(state.activeLobbyCode, 'chatGuessMode', false);
     pushGameSettingFB(state.activeLobbyCode, 'chatGuessHard', false);
     pushGameSettingFB(state.activeLobbyCode, 'autocheck', false);
+    if (window._gameMode === 'ranked' && window._fb) {
+      const { remove, ref, db } = window._fb;
+      remove(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`)).catch(() => {});
+    }
   }
   window._isRejoin = false;
 
@@ -952,8 +1117,6 @@ function enterGame(map, gameMode) {
     const knownIds = new Set(Object.keys(state.lastKnownPlayers));
     if (state.myPlayerId) knownIds.add(state.myPlayerId);
     Object.entries(data).forEach(([id, entry]) => {
-      if (!state.isHost && id === state.myPlayerId) { gameScores[id] = entry.score || 0; return; }
-      if (id === state.myPlayerId) return;
       if (knownIds.has(id)) gameScores[id] = entry.score || 0;
     });
     renderGameScores();
@@ -1122,8 +1285,12 @@ function renderGameGrid(size, cellNum, blackSet) {
   if (!container) return;
   const gridWrap = document.querySelector('.game-grid-wrap');
   let availW = 0;
-  if (gridWrap && gridWrap.clientWidth > 20) availW = gridWrap.clientWidth - 28;
-  else availW = Math.max(300, window.innerWidth - 380 - 340 - 28);
+  const cardEl = document.getElementById('grid-card-group');
+  if (cardEl && cardEl.clientWidth > 20) {
+    availW = cardEl.clientWidth - 32;
+  } else {
+    availW = Math.max(300, window.innerWidth - 380 - 340 - 24);
+  }
   availW = Math.min(availW, 680);
   const cellPx = Math.floor(availW / numCols);
   const totalW = cellPx * numCols;
@@ -1134,6 +1301,8 @@ function renderGameGrid(size, cellNum, blackSet) {
   container.style.width  = totalW + 'px';
   container.style.height = totalH + 'px';
   container.style.aspectRatio = 'unset';
+  const labelRow = document.getElementById('game-label-row');
+  if (labelRow) { labelRow.style.width = (totalW + 2) + 'px'; labelRow.style.margin = '0 auto'; }
   container.innerHTML = '';
   Object.keys(cellElCache).forEach(k => delete cellElCache[k]);
 
@@ -1299,7 +1468,16 @@ function setupKeyboard() {
       if (renameOpen) return;
       const chatInput = document.getElementById('game-chat-input');
       if (chatGuessMode) {
-        if (e.target.closest('.game-cell') || e.target.closest('.game-clue-item')) setTimeout(() => chatInput?.focus(), 20);
+        if (e.target.closest('.game-cell') || e.target.closest('.game-clue-item')) {
+          setTimeout(() => {
+            if (window.matchMedia('(pointer: coarse)').matches) {
+              // Mobile: focus chat input without scrolling
+              chatInput?.focus({ preventScroll: true });
+            } else {
+              chatInput?.focus();
+            }
+          }, 20);
+        }
         return;
       }
       if (document.activeElement === chatInput) return;
@@ -1620,9 +1798,11 @@ function renderGameScores() {
     const displayScore = isSpectator ? '' : isElim ? '' :
       (window._gameMode === 'ranked')
         ? (() => {
+            // All clients use _rankedPlayerCycleWords from Firebase minus the per-player carry-over baseline.
+            // For self, also factor in words typed since last FB push (_rankedCycleWordsCorrect is always up to date locally).
             const cw = id === state.myPlayerId
-              ? Math.min(3, _rankedCycleWordsCorrect)
-              : Math.min(3, _rankedPlayerCycleWords[id] || 0);
+              ? Math.max(0, _rankedCycleWordsCorrect - _rankedCarryOver)
+              : Math.max(0, (_rankedPlayerCycleWords[id] || 0) - (_rankedPlayerCarryOvers[id] || 0));
             return `${cw}/3`;
           })()
         : (autocheckEnabled||chatGuessMode) ? score : '—';
@@ -1718,7 +1898,14 @@ function checkPuzzleComplete() {
     if (window._gameMode==='versus'||window._gameMode==='ranked') {
       if (window._fb&&state.activeLobbyCode&&state.myPlayerId) {
         const {update,ref,db}=window._fb;
+        // Push final score so all players see the correct figure at game end
+        recomputeScores();
+        pushScoreToFB(state.activeLobbyCode,state.myPlayerId,{score:gameScores[state.myPlayerId]||0,name:state.playerName,colorHex:state.playerColor.hex,avatar:state.pixelAvatarData||null});
         update(ref(db,`lobbies/${state.activeLobbyCode}/versusFinish/${state.myPlayerId}`),{finishSec:authFinishSec,name:state.playerName,colorHex:state.playerColor.hex,ts:Date.now()}).catch(()=>{});
+        // Write a canonical finishSec so all players' timers agree
+        if (state.isHost) {
+          update(ref(db,`lobbies/${state.activeLobbyCode}/gameSettings`),{finishSec:authFinishSec}).catch(()=>{});
+        }
       }
       setTimeout(showGameOver,600);
     } else {
@@ -1757,19 +1944,35 @@ function applyGameSettings(settings) {
   const cgOn  = typeof settings.chatGuessMode==='boolean'?settings.chatGuessMode:chatGuessMode;
   const cgHard= typeof settings.chatGuessHard==='boolean'?settings.chatGuessHard:chatGuessHard;
   if (cgOn!==chatGuessMode||cgHard!==chatGuessHard) applyChatGuessModeUI(cgOn,cgHard);
+  if (settings.pullToLobby && !state.isHost && !window._pullToLobbyHandled) {
+    window._pullToLobbyHandled = settings.pullToLobby;
+    stopAllListeners();
+    sessionStorage.setItem('returningFromGame', '1');
+    window.location.href = 'lobby.html';
+    return;
+  }
   if (settings.gameEnded===true&&!state.isHost) {
     const goOverlay=document.getElementById('game-over-overlay');
     if (goOverlay?.classList.contains('hidden')&&window._puzzleCompletionAllowed&&state.activeLobbyCode) {
       clearInterval(gameTimerInterval);
-      // Use canonical finish time written by host so all players show the same timer
-      if (settings.finishSec != null) gameTimerSec = settings.finishSec;
-      else if (window._lastGameStartedAt) gameTimerSec = Math.max(0, Math.floor((Date.now() - window._lastGameStartedAt) / 1000));
-      setTimeout(showGameOver,400);
+      if (settings.finishSec!=null) gameTimerSec=settings.finishSec;
+      else if (window._lastGameStartedAt) gameTimerSec=Math.max(0,Math.floor((Date.now()-window._lastGameStartedAt)/1000));
+      if (window._fb&&state.activeLobbyCode) {
+        const {get,ref,db}=window._fb;
+        get(ref(db,`lobbies/${state.activeLobbyCode}/scores`)).then(snap=>{
+          const data=snap.val()||{};
+          const knownIds=new Set(Object.keys(state.lastKnownPlayers));
+          if (state.myPlayerId) knownIds.add(state.myPlayerId);
+          Object.entries(data).forEach(([id,entry])=>{ if (knownIds.has(id)) gameScores[id]=entry.score||0; });
+          setTimeout(showGameOver,400);
+        }).catch(()=>setTimeout(showGameOver,400));
+      } else {
+        setTimeout(showGameOver,400);
+      }
     }
   }
 }
-
-function toggleAutocheckWithConfirm() {
+  function toggleAutocheckWithConfirm() {
   if (!state.isHost) return;
   if (!autocheckEnabled) { openOverlay('autocheck-confirm-overlay'); return; }
   toggleAutocheck(false);
@@ -1787,6 +1990,19 @@ function toggleAutocheck(on) {
 // ── Chat Guess Mode ──
 function applyChatGuessModeUI(on, hard) {
   chatGuessMode=on; chatGuessHard=hard;
+  // Re-sync scores from Firebase when chat guess mode turns on so stale zeros aren't shown
+  if (on && state.activeLobbyCode && window._fb) {
+    const { get, ref, db } = window._fb;
+    get(ref(db, `lobbies/${state.activeLobbyCode}/scores`)).then(snap => {
+      const data = snap.val() || {};
+      const knownIds = new Set(Object.keys(state.lastKnownPlayers));
+      if (state.myPlayerId) knownIds.add(state.myPlayerId);
+      Object.entries(data).forEach(([id, entry]) => {
+        if (knownIds.has(id)) gameScores[id] = entry.score || 0;
+      });
+      renderGameScores();
+    }).catch(() => {});
+  }
   const btn=document.getElementById('chat-guess-btn');
   const modeToggle=document.getElementById('chat-guess-mode-toggle');
   const easyBtn=document.getElementById('toggle-easy-btn');
@@ -1810,7 +2026,7 @@ function applyChatGuessModeUI(on, hard) {
     const pill=document.getElementById('autocheck-pill');
     if (pill) pill.classList.add('autocheck-blurred');
     const nhIndicator=document.getElementById('nonhost-mode-indicator');
-    if (nhIndicator&&!state.isHost) {
+    if (nhIndicator&&!state.isHost&&window._gameMode!=='ranked') {
       nhIndicator.style.display='';
       nhIndicator.innerHTML=hard?'<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(224,81,81,0.18);border:1px solid #e05151;color:#e05151;letter-spacing:.05em;text-transform:uppercase;vertical-align:middle">Hard</span>&nbsp; Mode: type into chat to guess':'<span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(39,174,96,0.18);border:1px solid #27ae60;color:#27ae60;letter-spacing:.05em;text-transform:uppercase;vertical-align:middle">Easy</span>&nbsp; Mode: type into chat to guess';
     }
@@ -1866,11 +2082,16 @@ function fillWordInGrid(word,guess,playerId,playerColorHex,skipFBPush) {
   });
   const clueEl=document.getElementById(`clue-item-${word.dir}-${word.num}`);
   if (clueEl) { clueEl.classList.add('completed'); const t=clueEl.querySelector('.game-clue-text'); if (t) t.style.textDecoration='line-through'; }
+  // Ensure all cells in this word are marked correct in the DOM
+  word.cells.forEach(c => { const el = getCellEl(c.row, c.col); if (el) { el.classList.add('correct', 'has-letter'); el.classList.remove('wrong'); } });
   // In ranked mode, track how many words this player has gotten correct this cycle
   if (window._gameMode === 'ranked' && playerId === state.myPlayerId) {
     _rankedCycleWordsCorrect++;
+    // Keep _rankedPlayerCycleWords in sync for self so renderGameScores uses the same
+    // source for every player (Firebase-mirrored value) rather than a separate local counter
+    _rankedPlayerCycleWords[state.myPlayerId] = _rankedCycleWordsCorrect;
     renderRankedHUD();
-    // Push to Firebase so host can read it for elimination decisions
+    // Push to Firebase so all clients and host can read it
     if (state.activeLobbyCode && window._fb) {
       const { update, ref, db } = window._fb;
       update(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`), {
@@ -1878,14 +2099,11 @@ function fillWordInGrid(word,guess,playerId,playerColorHex,skipFBPush) {
       }).catch(() => {});
     }
     // If all active players have hit 3, collapse timer to 5 seconds
-    if (state.isHost && _rankedCycleWordsCorrect >= 3) {
+    if (state.isHost && _rankedCycleWordsCorrect === _rankedCarryOver + 3) {
       _checkAllPlayersSafe();
     }
   }
-  recomputeScores(); renderGameScores(); checkPuzzleComplete(); updateGridHighlight();
-  if ((window._gameMode==='versus'||window._gameMode==='ranked')&&state.activeLobbyCode) pushVersusGridState();
-  if (!state.isHost&&state.activeLobbyCode) pushScoreToFB(state.activeLobbyCode,state.myPlayerId,{score:gameScores[state.myPlayerId]||0,name:state.playerName,colorHex:state.playerColor.hex,avatar:state.pixelAvatarData||null});
-}
+  }
 
 function processChatGuess(text,playerId,playerColorHex) {
   const guess=text.trim().toUpperCase();
@@ -2091,8 +2309,9 @@ function pushVersusGridState() {
   _versusGridPushTimer=setTimeout(()=>{
     if (!gameGrid||!currentMap) return;
     const size=currentMap.size;
+    const numCols=currentMap.cols||size;
     const cells=[];
-    for (let r=0;r<size;r++) for (let c=0;c<size;c++) {
+    for (let r=0;r<size;r++) for (let c=0;c<numCols;c++) {
       const cell=gameGrid[r]&&gameGrid[r][c];
       if (!cell) { cells.push(0); continue; }
       if (cell.isBlack) { cells.push(0); continue; }
@@ -2154,8 +2373,10 @@ function startVersusGridPreview() {
       });
       const avatar=document.createElement('div');
       const avatarData=state.lastKnownPlayers[id]?.avatar||null;
-      avatar.style.cssText=`width:28px;height:28px;border-radius:50%;flex-shrink:0;background-color:${colorHex};background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;border:2px solid ${colorHex};`;
+      avatar.style.cssText=`width:28px;height:28px;border-radius:50%;flex-shrink:0;background-color:${colorHex};background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;border:2px solid ${colorHex};cursor:pointer;transition:transform .12s;`;
       if(avatarData){avatar.style.backgroundImage=`url(${avatarData})`;} else {avatar.textContent=(name||'?').charAt(0).toUpperCase();}
+      const initial=(name||'?').charAt(0).toUpperCase();
+      avatar.addEventListener('click',(e)=>{ e.stopPropagation(); openAvatarLightbox(avatarData||'',colorHex,name,initial); });
       const nameDiv=document.createElement('div');
       nameDiv.style.cssText=`color:${colorHex};font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%;text-align:center;max-width:${totalPx+20}px;`;
       nameDiv.textContent=name;
@@ -2195,11 +2416,13 @@ function startVersusGridPreview() {
   });
   setTimeout(() => pushVersusGridState(), 100);
   setTimeout(() => pushVersusGridState(), 500);
-  setInterval(() => { if (window._gameMode === 'versus' || window._gameMode === 'ranked') pushVersusGridState(); }, 500);
+  window._versusGridSyncInterval = setInterval(() => { if (window._gameMode === 'versus' || window._gameMode === 'ranked') pushVersusGridState(); }, 500);
 }
 
 function stopVersusGridPreview() {
   if (_stopVersusGrid) { _stopVersusGrid(); _stopVersusGrid=null; }
+  clearInterval(window._versusGridSyncInterval);
+  window._versusGridSyncInterval = null;
   if (state.activeLobbyCode&&state.myPlayerId) removeVersusGridFromFB(state.activeLobbyCode,state.myPlayerId);
   const wrap=document.getElementById('versus-previews-wrap');
   if (wrap) { wrap.innerHTML=''; wrap.style.display='none'; }
@@ -2207,8 +2430,8 @@ function stopVersusGridPreview() {
 
 // ── Game over ──
 function showGameOver() {
-  if ((autocheckEnabled||chatGuessMode)&&state.isHost) recomputeScores();
-  // Ensure game over is always on top of elimination overlays etc.
+  if (autocheckEnabled||chatGuessMode) recomputeScores();
+  if (window._lastGameStartedAt) gameTimerSec = Math.max(0, Math.floor((Date.now()-window._lastGameStartedAt)/1000));
   const goEl = document.getElementById('game-over-overlay');
   if (goEl) goEl.style.zIndex = '9999';
   const meId=state.myPlayerId;
@@ -2231,7 +2454,7 @@ function showGameOver() {
         const [winnerId]=sorted[0];
         const wp=state.lastKnownPlayers[winnerId]||(winnerId===meId?{name:state.playerName,colorHex:state.playerColor.hex,avatar:state.pixelAvatarData||null}:{name:'Player',colorHex:'#888',avatar:null});
         if (wp.avatar) { winnerAvatarEl.style.backgroundImage=`url(${wp.avatar})`; winnerAvatarEl.style.backgroundColor=wp.colorHex; winnerAvatarEl.textContent=''; }
-        else { winnerAvatarEl.style.backgroundImage=''; winnerAvatarEl.style.backgroundColor=wp.colorHex; winnerAvatarEl.textContent=(wp.name||'?').charAt(0).toUpperCase(); }
+        else { winnerAvatarEl.style.backgroundImage=''; winnerAvatarEl.style.backgroundColor=wp.colorHex; winnerAvatarEl.textContent=(wp.name||'?').charAt(0).toUpperCase(); winnerAvatarEl.style.display='flex'; winnerAvatarEl.style.alignItems='center'; winnerAvatarEl.style.justifyContent='center'; winnerAvatarEl.style.lineHeight='1'; }
       }
     }
   }
@@ -2244,9 +2467,9 @@ function showGameOver() {
     const avatarStyle=p.avatar?`background-image:url(${p.avatar});background-color:${p.colorHex}`:`background-color:${p.colorHex}`;
     row.innerHTML=`
       <div class="game-over-rank">${i+1}</div>
-      <div class="game-over-avatar" style="${avatarStyle}">${p.avatar?'':initial}</div>
+      <div class="game-over-avatar" style="${avatarStyle};display:flex;align-items:center;justify-content:center;line-height:1;font-size:13px;font-weight:700;color:#fff;">${p.avatar?'':initial}</div>
       <div class="game-over-name-wrap">
-        <span class="game-over-name">${p.name||'Player'}</span>
+        <span class="game-over-name" style="color:${p.colorHex}">${p.name||'Player'}</span>
         ${!isTogetherMode&&isWinner?'<span class="game-over-winner-tag">Winner</span>':''}
       </div>
       <div class="game-over-score">${score} pt${score!==1?'s':''}</div>
@@ -2268,10 +2491,10 @@ function showGameOver() {
     }
   } else if (isRanked) {
     const winner = sorted.find(([id]) => !_rankedEliminatedPlayers.has(id));
-    if (titleEl) titleEl.textContent = winner ? `${state.lastKnownPlayers[winner[0]]?.name||'A player'} wins!` : 'Race the Clock ended';
+    if (titleEl) { if (winner) { const wName = state.lastKnownPlayers[winner[0]]?.name||'A player'; const wColor = state.lastKnownPlayers[winner[0]]?.colorHex||'#fff'; titleEl.innerHTML = `<span style="color:${wColor}">${wName}</span> wins!`; } else { titleEl.textContent = 'Race the Clock ended'; } }
     if (subtitleEl) subtitleEl.textContent = `Game lasted ${timeStr}`;
   } else {
-    if (titleEl) titleEl.textContent='Game Ended';
+    if (titleEl) { const wName = sorted.length ? (state.lastKnownPlayers[sorted[0][0]]?.name || (sorted[0][0]===meId ? state.playerName : 'A player')) : 'A player'; const wColor = state.lastKnownPlayers[sorted[0][0]]?.colorHex || state.playerColor.hex || '#fff'; titleEl.innerHTML = `<span style="color:${wColor}">${wName}</span> wins!`; }
     if (subtitleEl) subtitleEl.textContent=`Completed in ${timeStr}`;
   }
   openOverlay('game-over-overlay');
@@ -2324,6 +2547,7 @@ async function playAgain() {
     if (state.isHost) { try { await update(ref(db,`lobbies/${state.activeLobbyCode}`),{status:'waiting'}); } catch {} }
   }
   if (typeof window.removeVote==='function') window.removeVote();
+  sessionStorage.setItem('returningFromGame', '1');
   window.location.href='lobby.html';
 }
 
@@ -2573,13 +2797,29 @@ if (!puzzleJson) {
   document.getElementById('do-reveal-grid')?.addEventListener('click', ()=>{
     closeOverlay('reveal-grid-overlay');
     gameWords.forEach(w=>w.cells.forEach((c,i)=>{
-      const fl='revealed'; const fc=state.playerColor.hex||'#888';
-      gameGrid[c.row][c.col].letter=w.answer[i]; gameGrid[c.row][c.col].filledBy=fl; gameGrid[c.row][c.col].revealed=true;
+      const cell=gameGrid[c.row][c.col];
+      if (cell.letter===w.answer[i]&&cell.filledBy&&cell.filledBy!=='revealed') {
+        const cellEl=getCellEl(c.row,c.col);
+        if (cellEl) { cellEl.classList.remove('wrong'); cellEl.classList.add('has-letter','correct'); }
+        return;
+      }
+      const fc='#000000';
+      cell.letter=w.answer[i]; cell.filledBy='revealed'; cell.revealed=true; cell.filledColor=fc;
       const letterEl=document.getElementById(`cell-letter-${c.row}-${c.col}`); if (letterEl) { letterEl.textContent=w.answer[i]; letterEl.style.color=fc; }
       const cellEl=getCellEl(c.row,c.col); if (cellEl) { cellEl.classList.remove('wrong'); cellEl.classList.add('has-letter','correct'); }
-      if (state.activeLobbyCode) pushCellToFB(state.activeLobbyCode,c.row,c.col,w.answer[i],fl,fc,true);
+      if (state.activeLobbyCode) pushCellToFB(state.activeLobbyCode,c.row,c.col,w.answer[i],'revealed',fc,true);
     }));
-    checkPuzzleComplete();
+    recomputeScores();
+    const authFinishSec=window._lastGameStartedAt
+      ?Math.max(0,Math.floor((Date.now()-window._lastGameStartedAt)/1000))
+      :gameTimerSec;
+    gameTimerSec=authFinishSec;
+    clearInterval(gameTimerInterval);
+    if (state.activeLobbyCode&&window._fb) {
+      const {update,ref,db}=window._fb;
+      update(ref(db,`lobbies/${state.activeLobbyCode}/gameSettings`),{gameEnded:true,finishSec:authFinishSec}).catch(()=>{});
+    }
+    setTimeout(showGameOver,600);
   });
   document.getElementById('cancel-reveal-grid')?.addEventListener('click', ()=>closeOverlay('reveal-grid-overlay'));
   document.getElementById('action-confirm-btn')?.addEventListener('click', doActionConfirm);
@@ -2603,7 +2843,7 @@ if (!puzzleJson) {
   document.getElementById('leave-confirm-go')?.addEventListener('click', doLeaveGame);
   document.getElementById('back-lobby-stay')?.addEventListener('click', ()=>closeOverlay('back-to-lobby-confirm-overlay'));
   document.getElementById('back-lobby-go')?.addEventListener('click', doGoBackToLobby);
-  document.getElementById('avatar-lightbox')?.addEventListener('click', ()=>closeAvatarLightbox());
+  document.getElementById('avatar-lightbox')?.addEventListener('click', (e)=>{ if(e.target===document.getElementById('avatar-lightbox')) { const lb=document.getElementById('avatar-lightbox'); if(lb) lb.style.display='none'; } });
 }
 
 function waitAndInit() {

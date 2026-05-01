@@ -166,14 +166,13 @@
 
     <!-- Center: grid -->
     <div class="game-grid-wrap">
-      <div style="display:flex;align-items:center;justify-content:space-between;width:100%;max-width:680px;margin-bottom:4px;margin-top:20px">
-        <div class="game-map-label" id="game-map-label">Loading…</div>
-        <div class="game-timer" id="game-timer">0:00</div>
-      </div>
-
-      <div id="grid-card-group" style="width:100%;max-width:680px;margin-top:24px;background:transparent;border-top:0.5px solid var(--border);padding:12px 0 0;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:10px">
-        <div id="game-active-clue-inner" class="game-active-clue" style="margin-bottom:0;width:100%;max-width:none;padding:0 14px">Select a cell to begin</div>
-        <div class="game-grid-container" style="width:100%;position:relative;display:flex;justify-content:center;padding:0">
+      <div id="grid-card-group" style="width:100%;max-width:680px;margin-top:20px;background:var(--bg2);border:0.5px solid var(--border);border-radius:12px;padding:16px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px">
+        <div id="game-label-row" style="position:relative;display:flex;align-items:center;justify-content:center;width:100%">
+          <div class="game-map-label" id="game-map-label" style="position:absolute;left:0">Loading…</div>
+          <div id="game-active-clue-inner" class="game-active-clue" style="margin:0;text-align:center;padding:0 12px;min-height:unset">Select a cell to begin</div>
+          <div class="game-timer" id="game-timer" style="position:absolute;right:0">0:00</div>
+        </div>
+        <div class="game-grid-container" style="position:relative;display:inline-flex;justify-content:center;padding:0;margin-left:-6px">
           <input id="game-hidden-input" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" aria-hidden="true" tabindex="-1">
           <div class="game-grid" id="game-grid"></div>
         </div>
@@ -183,7 +182,7 @@
 
       <!-- Host toolbar -->
       <div id="game-host-toolbar" style="display:none;flex-direction:column;gap:0;width:100%;max-width:680px;margin-top:12px;background:var(--bg3);border:0.5px solid var(--border);border-radius:10px;overflow:visible">
-        <div id="host-toolbar-header" style="padding:10px 14px;border-bottom:0.5px solid var(--border);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text2);display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;transition:background .15s;border-radius:10px 10px 0 0">
+        <div id="host-toolbar-header" style="padding:10px 14px;border-bottom:none;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text2);display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;transition:background .15s;border-radius:10px">
           <div style="display:flex;align-items:center;gap:7px">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             Host Settings
@@ -240,10 +239,11 @@
 
     <!-- Right: scoreboard + chat -->
     <div class="game-sidebar">
-      <!-- Logo -->
-      <div style="margin-bottom:10px;display:flex;align-items:center;justify-content:center;padding:4px 0 0">
-        <img src="../images/crosswordwithfriends.svg" style="width:100%;max-width:260px;height:auto;opacity:0.95" alt="Logo">
+      <!-- Mode label card -->
+      <div id="sidebar-mode-card" style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:10px 12px;font-size:13px;font-weight:600;color:var(--text)" id="sidebar-mode-desc">Loading…</div>
       </div>
+      
 
       
 
@@ -260,8 +260,8 @@
       </div>
 
       <!-- Chat -->
-      <div class="game-sidebar-section" style="display:flex;flex-direction:column;min-height:0">
-        <div class="game-chat-box" style="height:500px;flex:none">
+      <div class="game-sidebar-section" style="display:flex;flex-direction:column;min-height:0;">
+        <div class="game-chat-box">
           <div style="padding:8px 10px;border-bottom:0.5px solid var(--border);background:var(--bg3);flex-shrink:0">
             <span class="game-sidebar-label" style="margin-bottom:0">Chat</span>
           </div>
@@ -276,7 +276,7 @@
       </div>
 
       <!-- Match code -->
-      <div class="game-sidebar-section" style="margin-bottom:8px">
+      <div class="game-sidebar-section">
         <div style="background:var(--banner-bg);border:0.5px solid var(--border);border-radius:8px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px">
           <div style="min-width:0;flex:1">
             <div class="banner-label" style="margin-bottom:2px">Match Code</div>

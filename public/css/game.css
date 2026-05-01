@@ -1,5 +1,13 @@
 /* ── game.css — In-game grid, clues, sidebar styles ── */
 
+* { scrollbar-width: none; scrollbar-color: var(--border) transparent; }
+html::-webkit-scrollbar { width: 0.5px; }
+html::-webkit-scrollbar-track { background: transparent; }
+html::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+body::-webkit-scrollbar { width: 0.5px; }
+body::-webkit-scrollbar-track { background: transparent; }
+body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
 /* ── Game layout ── */
 .game-layout {
   display: grid;
@@ -9,9 +17,14 @@
   overflow: hidden;
 }
 @media (max-width: 1000px) {
-  .game-layout { grid-template-columns: 1fr; height: auto; overflow: visible; }
-  .game-clues-panel { display: none; }
-  .game-sidebar { border-left: none; border-top: 0.5px solid var(--border); max-height: 320px; }
+  .game-layout { grid-template-columns: 1fr !important; height: auto; overflow: visible; }
+  .game-clues-panel { display: none !important; }
+  .game-sidebar { border-left: none; border-top: 0.5px solid var(--border); padding: 0 12px 16px; box-sizing: border-box; }
+  .game-grid-wrap { padding: 8px 0 40px; box-sizing: border-box; }
+  #grid-card-group { width: calc(100% - 24px) !important; max-width: calc(100% - 24px) !important; box-sizing: border-box; margin-left: 12px; margin-right: 12px; }
+  #game-host-toolbar { width: calc(100% - 24px) !important; max-width: calc(100% - 24px) !important; box-sizing: border-box; margin-left: 12px; margin-right: 12px; }
+  .versus-previews-wrap { max-width: calc(100% - 24px) !important; }
+  #nonhost-mode-indicator { max-width: calc(100% - 24px) !important; }
 }
 
 /* ── Timer / map label ── */
@@ -36,9 +49,12 @@
 .game-clues-col {
   overflow-y: auto; display: flex; flex-direction: column;
   flex: 1; min-height: 0;
+  scrollbar-gutter: stable;
 }
-.game-clues-col::-webkit-scrollbar { width: 3px; }
+.game-clues-col::-webkit-scrollbar { width: 0.5px; }
+.game-clues-col::-webkit-scrollbar-track { background: transparent; margin-top: 34px; margin-bottom: 12px; }
 .game-clues-col::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
 .game-clues-divider { background: var(--border); width: 1px; }
 .game-clues-heading {
   font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
@@ -62,7 +78,7 @@
 /* ── Grid area ── */
 .game-grid-wrap {
   display: flex; flex-direction: column; align-items: center;
-  justify-content: flex-start; padding: 8px 12px 40px; overflow-y: auto;
+  justify-content: flex-start; padding: 8px 0 40px; overflow-y: auto;
   background: var(--bg);
 }
 .game-active-clue {
@@ -71,7 +87,7 @@
   max-width: 580px; width: 100%;
 }
 .game-active-clue strong { color: var(--text); }
-.game-grid-container { width: 100%; display: flex; justify-content: center; position: relative; align-items: flex-start; }
+.game-grid-container { display: flex; justify-content: center; position: relative; align-items: flex-start; width: fit-content; }
 
 #game-hidden-input {
   position: absolute; opacity: 0; pointer-events: none;
@@ -82,7 +98,7 @@
 /* ── NYT-style grid ── */
 .game-grid {
   display: grid; gap: 0;
-  width: min(100%, 680px); aspect-ratio: 1;
+  flex-shrink: 0;
   border: 3px solid #1a1a1a;
   background: #1a1a1a;
   position: relative;
@@ -187,9 +203,18 @@
 .game-sidebar {
   border-left: 0.5px solid var(--border); background: var(--bg3);
   display: flex; flex-direction: column;
-  overflow: hidden; padding: 8px 16px 16px;
+  overflow-y: auto; padding: 0 16px 16px;
+  gap: 8px;
 }
-.game-sidebar-section { margin-bottom: 10px; }
+
+#sidebar-mode-card {
+  position: sticky;
+  top: 16px;
+  z-index: 2;
+  margin-top: 16px;
+  flex-shrink: 0;
+}
+.game-sidebar-section { margin-bottom: 0; min-height: 0; flex-shrink: 0; }
 .game-sidebar-label {
   font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
   color: var(--text3); margin-bottom: 10px;
@@ -215,14 +240,15 @@
 .game-chat-box {
   display: flex; flex-direction: column;
   border: 0.5px solid var(--border); border-radius: 10px; overflow: hidden;
-  background: var(--card-bg); flex: 1; min-height: 0; cursor: text;
+  background: var(--card-bg); flex: 0 0 auto; min-height: 0; cursor: text; max-height: 490px;
 }
 .game-chat-messages {
   flex: 1; overflow-y: auto; padding: 10px;
   display: flex; flex-direction: column; gap: 6px;
   scroll-behavior: smooth;
+  max-height: 400px; min-height: 200px;
 }
-.game-chat-messages::-webkit-scrollbar { width: 3px; }
+.game-chat-messages::-webkit-scrollbar { width: 1px; }
 .game-chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 .game-chat-empty { font-size: 12px; color: var(--text3); text-align: center; padding: 20px 0; }
 .game-chat-msg {
@@ -239,6 +265,8 @@
   cursor: pointer; transition: transform .12s;
 }
 .game-chat-msg-avatar:hover { transform: scale(1.25); }
+.versus-preview-player .game-score-avatar:hover,
+.versus-previews-wrap div[style*="border-radius:50%"]:hover { transform: scale(1.25); }
 .game-chat-msg-name { font-size: 11px; font-weight: 600; }
 .game-chat-msg-text { font-size: 12px; color: var(--text); line-height: 1.35; padding-left: 21px; word-break: break-word; }
 .game-chat-input-row {
@@ -269,6 +297,7 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; font-weight: 700; color: #fff;
   background-size: cover; background-position: center;
+  overflow: hidden; align-self: center; line-height: 1;
 }
 .game-over-name-wrap { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; text-align: left; }
 .game-over-name { font-size: 13px; font-weight: 600; color: var(--text); }
@@ -302,4 +331,14 @@
   width: 100%; max-width: 680px; margin-top: 10px;
   padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 500;
   background: var(--bg3); border: 0.5px solid var(--border); color: var(--text3);
+  flex-shrink: 0;
 }
+
+/* ── Game page scrollbar ── */
+.game-grid-wrap::-webkit-scrollbar { width: 0.5px; }
+.game-grid-wrap::-webkit-scrollbar-track { background: transparent; }
+.game-grid-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.game-sidebar::-webkit-scrollbar { width: 0.5px; }
+.game-sidebar::-webkit-scrollbar-track { background: transparent; }
+.game-sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }

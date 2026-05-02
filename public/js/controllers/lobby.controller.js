@@ -638,8 +638,8 @@ async function joinActiveMatch() {
         Object.entries(freshPlayers).forEach(([id, p]) => {
           if (!p) return;
           merged[id] = {
-            name: p.name || 'Player',
-            colorHex: p.colorHex || '#888888',
+            name: (p.name && p.name.trim()) ? p.name.trim() : 'Player',
+            colorHex: (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') ? p.colorHex : '#888888',
             avatar: p.avatar !== undefined ? p.avatar : null,
             isHost: typeof p.isHost === 'boolean' ? p.isHost : false,
             inGame: p.inGame || false,
@@ -1290,8 +1290,8 @@ if (state.activeLobbyCode && window._fb) {
     Object.entries(players).forEach(([id, p]) => {
       if (!p || id === state.myPlayerId) return;
       if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
-      state.lastKnownPlayers[id].name = p.name || 'Player';
-      state.lastKnownPlayers[id].colorHex = p.colorHex || '#888';
+      state.lastKnownPlayers[id].name = (p.name && p.name.trim()) ? p.name.trim() : (state.lastKnownPlayers[id].name || 'Player');
+      state.lastKnownPlayers[id].colorHex = (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') ? p.colorHex : (state.lastKnownPlayers[id].colorHex || '#888888');
       if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
       if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
     });
@@ -1299,7 +1299,6 @@ if (state.activeLobbyCode && window._fb) {
     renderPlayerList();
   }).catch(() => {});
 }
-
 // Persist session for rejoin on page close
 localStorage.setItem('cwf_session', JSON.stringify({
   lobbyCode: state.activeLobbyCode,
@@ -1318,14 +1317,15 @@ localStorage.setItem('cwf_session', JSON.stringify({
         if (!snap.exists()) return;
         const players = snap.val() || {};
         Object.entries(players).forEach(([id, p]) => {
+          const existing = state.lastKnownPlayers[id] || {};
           state.lastKnownPlayers[id] = {
-            name:     p.name     || '',
-            colorHex: p.colorHex || '#888888',
-            avatar:   p.avatar   || null,
+            name:     (p.name && p.name.trim()) ? p.name.trim() : (existing.name || 'Player'),
+            colorHex: (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') ? p.colorHex : (existing.colorHex || '#888888'),
+            avatar:   p.avatar   !== undefined ? p.avatar   : (existing.avatar   || null),
             vote:     p.vote     || null,
             voteMeta: p.voteMeta || null,
-            isHost:   p.isHost   || false,
-            inGame:   p.inGame   || false,
+            isHost:   typeof p.isHost === 'boolean' ? p.isHost : (existing.isHost || false),
+            inGame:   typeof p.inGame === 'boolean' ? p.inGame : (existing.inGame || false),
           };
         });
         _lastPlayerListKey = '';
@@ -1354,8 +1354,8 @@ function subscribeLobbyFB() {
       Object.entries(players).forEach(([id, p]) => {
         if (id === state.myPlayerId) return;
         state.lastKnownPlayers[id] = {
-          name:     (p.name && p.name.trim()) ? p.name : 'Player',
-          colorHex: p.colorHex || '#888888',
+          name:     (p.name && p.name.trim()) ? p.name.trim() : 'Player',
+          colorHex: (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') ? p.colorHex : '#888888',
           avatar:   p.avatar   || null,
           vote:     p.vote     || null,
           voteMeta: p.voteMeta || null,
@@ -1397,8 +1397,8 @@ function subscribeLobbyFB() {
         incoming[id] = existing;
       } else {
         incoming[id] = {
-          name:     (p.name && p.name.trim()) ? p.name : (existing.name || 'Player'),
-          colorHex: p.colorHex || existing.colorHex || '#888888',
+          name:     (p.name && p.name.trim()) ? p.name.trim() : (existing.name || 'Player'),
+          colorHex: (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') ? p.colorHex : (existing.colorHex || '#888888'),
           avatar:   p.avatar   !== undefined ? p.avatar   : (existing.avatar   || null),
           vote:     p.vote     || null,
           voteMeta: p.voteMeta || null,

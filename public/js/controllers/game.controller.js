@@ -1184,12 +1184,23 @@ function enterGame(map, gameMode) {
   _stopPlayerInfo = startPlayerInfoListener(state.activeLobbyCode, snap => {
     const players = snap.val() || {};
     Object.entries(players).forEach(([id, p]) => {
-      if (!p || id === state.myPlayerId) return;
+      if (!p) return;
       if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
-      state.lastKnownPlayers[id].name = p.name || state.lastKnownPlayers[id].name || 'Player';
-      state.lastKnownPlayers[id].colorHex = p.colorHex || state.lastKnownPlayers[id].colorHex || '#888';
+      if (p.name && p.name.trim()) {
+        state.lastKnownPlayers[id].name = p.name.trim();
+      } else if (!state.lastKnownPlayers[id].name) {
+        state.lastKnownPlayers[id].name = 'Player';
+      }
+      if (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') {
+        state.lastKnownPlayers[id].colorHex = p.colorHex;
+      } else if (!state.lastKnownPlayers[id].colorHex) {
+        state.lastKnownPlayers[id].colorHex = '#888888';
+      }
       if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
-      if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
+      state.lastKnownPlayers[id].isHost = typeof p.isHost === 'boolean' ? p.isHost : false;
+      if (id === state.myPlayerId) {
+        state.isHost = !!p.isHost;
+      }
       if (!gameScores[id]) gameScores[id] = 0;
     });
     try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
@@ -1310,7 +1321,7 @@ function enterGame(map, gameMode) {
       state.lastKnownPlayers[id].name = (p.name && p.name !== 'Player') ? p.name : (state.lastKnownPlayers[id].name || p.name || 'Player');
       state.lastKnownPlayers[id].colorHex = (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') ? p.colorHex : (state.lastKnownPlayers[id].colorHex || p.colorHex || '#888888');
       if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
-      if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
+      state.lastKnownPlayers[id].isHost = typeof p.isHost === 'boolean' ? p.isHost : false;
 
       if (id !== state.myPlayerId && p.colorHex && prev && p.colorHex !== prev) {
         repaintGameChatColor(id, p.name || state.lastKnownPlayers[id].name, p.colorHex);
@@ -2921,8 +2932,8 @@ if (!puzzleJson) {
                 state.lastKnownPlayers[id].name = p.name || state.lastKnownPlayers[id].name || 'Player';
                 state.lastKnownPlayers[id].colorHex = p.colorHex || state.lastKnownPlayers[id].colorHex || '#888888';
                 if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
-                if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
-                if (id === state.myPlayerId) state.isHost = p.isHost || state.isHost;
+                state.lastKnownPlayers[id].isHost = typeof p.isHost === 'boolean' ? p.isHost : false;
+                if (id === state.myPlayerId) state.isHost = !!p.isHost;
               });
               try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
             }).catch(() => {});
@@ -3034,7 +3045,7 @@ document.addEventListener('visibilitychange', () => {
       state.lastKnownPlayers[id].name = p.name || state.lastKnownPlayers[id].name;
       state.lastKnownPlayers[id].colorHex = p.colorHex || state.lastKnownPlayers[id].colorHex;
       if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
-      if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
+      state.lastKnownPlayers[id].isHost = typeof p.isHost === 'boolean' ? p.isHost : false;
     });
     renderGameScores();
   } catch {}

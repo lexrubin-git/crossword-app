@@ -1199,7 +1199,14 @@ function enterGame(map, gameMode) {
       if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
       state.lastKnownPlayers[id].isHost = typeof p.isHost === 'boolean' ? p.isHost : false;
       if (id === state.myPlayerId) {
+        const wasHost = state.isHost;
         state.isHost = !!p.isHost;
+        if (state.isHost !== wasHost) {
+          const toolbar = document.getElementById('game-host-toolbar');
+          if (toolbar) toolbar.style.display = (state.isHost && window._gameMode !== 'ranked') ? 'flex' : 'none';
+          const nhIndicator = document.getElementById('nonhost-mode-indicator');
+          if (nhIndicator) nhIndicator.style.display = (state.isHost && window._gameMode !== 'ranked') ? 'none' : '';
+        }
       }
       if (!gameScores[id]) gameScores[id] = 0;
     });

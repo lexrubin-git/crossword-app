@@ -1399,6 +1399,7 @@ function subscribeLobbyFB() {
       const existing = state.lastKnownPlayers[id] || {};
       if (id === state.myPlayerId) {
         incoming[id] = existing;
+        incoming[id].isHost = p.isHost || false;
       } else {
         incoming[id] = {
           name:     (p.name && p.name.trim()) ? p.name.trim() : (existing.name || 'Player'),

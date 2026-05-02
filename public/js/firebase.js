@@ -20,6 +20,7 @@ import {
   onChildChanged,
   serverTimestamp,
   onDisconnect,
+  runTransaction,
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js';
 
 const firebaseConfig = {
@@ -48,6 +49,7 @@ window._fb = window._fb || (() => {
     onChildChanged,
     serverTimestamp,
     onDisconnect,
+    runTransaction,
   };
 })();
 

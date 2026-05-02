@@ -103,18 +103,15 @@ export async function removePlayer(code, playerId) {
 }
 
 export async function transferHost(code, newHostId, oldHostId) {
-  const { db, ref, runTransaction } = fb();
-  await runTransaction(ref(db, `lobbies/${code}`), (lobby) => {
-    if (!lobby) return;
-    if (oldHostId && lobby.players && lobby.players[oldHostId]) {
-      lobby.players[oldHostId].isHost = false;
-    }
-    if (lobby.players && lobby.players[newHostId]) {
-      lobby.players[newHostId].isHost = true;
-    }
-    lobby.host = newHostId;
-    return lobby;
-  });
+  const { db, ref, update } = fb();
+  const updates = {
+    host: newHostId,
+    [`players/${newHostId}/isHost`]: true,
+  };
+  if (oldHostId) {
+    updates[`players/${oldHostId}/isHost`] = false;
+  }
+  await update(ref(db, `lobbies/${code}`), updates);
 }
 
 export async function setLobbyMode(code, mode) {

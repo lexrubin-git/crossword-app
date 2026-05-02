@@ -123,8 +123,6 @@ async function _checkAllPlayersSafe() {
       renderRankedHUD();
     }, 1000);
     window._rankedFirstTimeout = setTimeout(async () => {
-      clearInterval(_rankedCountdownTimer);
-      _rankedCountdownTimer = null;
       await doRankedElimination();
       _rankedEliminationTimer = setInterval(async () => {
         await doRankedElimination();

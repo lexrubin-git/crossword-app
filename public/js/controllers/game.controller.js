@@ -1363,22 +1363,29 @@ function enterGame(map, gameMode) {
     // Host disconnect in-game
     const hostPresent = Object.values(players).some(p => p?.isHost)
       || Object.values(state.lastKnownPlayers).some(p => p?.isHost);
-    if (!hostPresent && !state.isHost && state.activeLobbyCode && state.myPlayerId) {
+    if (hostPresent || state.isHost) {
+      if (window._hostClaimTimer) { clearTimeout(window._hostClaimTimer); window._hostClaimTimer = null; }
+    } else if (!state.isHost && state.activeLobbyCode && state.myPlayerId) {
       const ids = Object.keys(players).sort();
-      if (ids.length > 0 && ids[0] === state.myPlayerId) {
-        state.isHost = true;
-        if (window._fb) {
-          const { update, ref, db } = window._fb;
-          const upd = {};
-          upd[`players/${state.myPlayerId}/isHost`] = true;
-          upd['host'] = state.myPlayerId;
-          update(ref(db, `lobbies/${state.activeLobbyCode}`), upd).catch(() => {});
-        }
-        const toolbar = document.getElementById('game-host-toolbar');
-        if (toolbar) toolbar.style.display = window._gameMode !== 'ranked' ? 'flex' : 'none';
-        const nhIndicator = document.getElementById('nonhost-mode-indicator');
-        if (nhIndicator) nhIndicator.style.display = window._gameMode !== 'ranked' ? 'none' : '';
-        renderGameScores();
+      if (ids.length > 0 && ids[0] === state.myPlayerId && !window._hostClaimTimer) {
+        window._hostClaimTimer = setTimeout(() => {
+          window._hostClaimTimer = null;
+          const stillNoHost = !Object.values(state.lastKnownPlayers).some(p => p?.isHost);
+          if (!stillNoHost || state.isHost) return;
+          state.isHost = true;
+          if (window._fb) {
+            const { update, ref, db } = window._fb;
+            const upd = {};
+            upd[`players/${state.myPlayerId}/isHost`] = true;
+            upd['host'] = state.myPlayerId;
+            update(ref(db, `lobbies/${state.activeLobbyCode}`), upd).catch(() => {});
+          }
+          const toolbar = document.getElementById('game-host-toolbar');
+          if (toolbar) toolbar.style.display = window._gameMode !== 'ranked' ? 'flex' : 'none';
+          const nhIndicator = document.getElementById('nonhost-mode-indicator');
+          if (nhIndicator) nhIndicator.style.display = window._gameMode !== 'ranked' ? 'none' : '';
+          renderGameScores();
+        }, 2500);
       }
     }
     // Live-update versus preview grid player info
@@ -2652,6 +2659,7 @@ function showGameOver() {
 
 // ── Leave / Navigation ──
 function stopAllListeners() {
+  if (window._hostClaimTimer) { clearTimeout(window._hostClaimTimer); window._hostClaimTimer = null; }
   clearInterval(gameTimerInterval);
   clearInterval(window._timerResyncInterval);
   stopCursorTracking();

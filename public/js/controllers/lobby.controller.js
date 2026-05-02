@@ -647,9 +647,14 @@ async function joinActiveMatch() {
           };
         });
         try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(merged)); } catch {}
+        cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
         window.location.href = 'game.html';
-      }).catch(() => { window.location.href = 'game.html'; });
+      }).catch(() => {
+        cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
+        window.location.href = 'game.html';
+      });
     } else {
+      cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
       window.location.href = 'game.html';
     }
   } catch { showToast('Could not join match.'); }

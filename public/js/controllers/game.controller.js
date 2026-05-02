@@ -1354,7 +1354,8 @@ function enterGame(map, gameMode) {
       }
     });
     // Host disconnect in-game
-    const hostPresent = Object.values(players).some(p => p?.isHost);
+    const hostPresent = Object.values(players).some(p => p?.isHost)
+      || Object.values(state.lastKnownPlayers).some(p => p?.isHost);
     if (!hostPresent && !state.isHost && state.activeLobbyCode && state.myPlayerId) {
       const ids = Object.keys(players).sort();
       if (ids.length > 0 && ids[0] === state.myPlayerId) {
@@ -1370,6 +1371,7 @@ function enterGame(map, gameMode) {
         if (toolbar) toolbar.style.display = window._gameMode !== 'ranked' ? 'flex' : 'none';
         const nhIndicator = document.getElementById('nonhost-mode-indicator');
         if (nhIndicator) nhIndicator.style.display = window._gameMode !== 'ranked' ? 'none' : '';
+        renderGameScores();
       }
     }
     // Live-update versus preview grid player info

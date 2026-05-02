@@ -1203,9 +1203,13 @@ async function _doStartGame() {
         sessionStorage.setItem('lastKnownPlayers', JSON.stringify(fresh));
       }).catch(() => {
         try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
-      }).finally(() => { window.location.href = 'game.html'; });
+      }).finally(() => {
+        cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
+        window.location.href = 'game.html';
+      });
     } else {
       try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+      cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
       window.location.href = 'game.html';
     }
   } catch (e) {
@@ -1517,13 +1521,16 @@ function subscribeLobbyFB() {
               };
             });
             try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(merged)); } catch {}
+            cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
             window.location.href = 'game.html';
           }).catch(() => {
             try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+            cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
             window.location.href = 'game.html';
           });
         } else {
           try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+          cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
           window.location.href = 'game.html';
         }
         return;

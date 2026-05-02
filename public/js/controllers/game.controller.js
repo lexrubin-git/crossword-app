@@ -677,7 +677,13 @@ function subscribeRankedFB() {
     Object.entries(data).forEach(([id, count]) => {
       const newCount = count || 0;
       if (id === state.myPlayerId) {
-        // Self display uses _rankedCycleWordsCorrect/_rankedCarryOver directly — skip FB update for self
+        // Detect round reset: host wrote carry-over (less than current total) — must update local state
+        if (newCount < _rankedCycleWordsCorrect && _rankedCycleWordsCorrect > 0) {
+          _rankedCarryOver = 0;
+          _rankedCycleWordsCorrect = newCount;
+          _rankedPlayerCycleWords[id] = newCount;
+        }
+        // Otherwise skip — self display uses _rankedCycleWordsCorrect/_rankedCarryOver directly
       } else if (newCount < (_rankedPlayerCycleWords[id] || 0) && (_rankedPlayerCycleWords[id] || 0) > 0) {
         // Round reset detected for another player
         _rankedPlayerCarryOvers[id] = 0;
@@ -761,24 +767,19 @@ function subscribeRankedFB() {
         const { get, ref, db } = window._fb;
         get(ref(db, `lobbies/${state.activeLobbyCode}/rankedCycleWords`)).then(snap => {
           const allCycleWords = snap.exists() ? (snap.val() || {}) : {};
-          const myCarryOver = allCycleWords[state.myPlayerId] || 0;
-          // myCarryOver is already the new baseline (host wrote carry-over as new starting count)
-          _rankedCarryOver = 0;
-          _rankedCycleWordsCorrect = myCarryOver;
-          // Reset carry-over baseline for ALL players: their current count IS their new baseline
+          // Reset carry-over baseline for all OTHER players (self is handled by rankedCycleWords onValue)
           Object.keys(allCycleWords).forEach(id => {
+            if (id === state.myPlayerId) return;
             _rankedPlayerCarryOvers[id] = 0;
             _rankedPlayerCycleWords[id] = allCycleWords[id] || 0;
           });
           // Also reset any players not yet in allCycleWords
           Object.keys(state.lastKnownPlayers).forEach(id => {
-            if (!(id in allCycleWords)) {
+            if (!(id in allCycleWords) && id !== state.myPlayerId) {
               _rankedPlayerCarryOvers[id] = 0;
               _rankedPlayerCycleWords[id] = 0;
             }
           });
-          // Explicitly sync self so score display is correct before Firebase re-fires
-          _rankedPlayerCycleWords[state.myPlayerId] = myCarryOver;
           renderRankedHUD();
           renderGameScores();
         }).catch(() => {});

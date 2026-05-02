@@ -222,9 +222,10 @@ function renderRankedHUD() {
       cw: Math.max(0, (_rankedPlayerCycleWords[id] || 0) - (_rankedPlayerCarryOvers[id] || 0))
     }))
     .sort((a, b) => a.cw !== b.cw ? a.cw - b.cw : a.id.localeCompare(b.id));
-  const atRisk = activeForHUD[0] || null;
+  const anyPassed = activeForHUD.some(p => p.cw >= 3);
+  const atRisk = anyPassed ? (activeForHUD.find(p => p.cw < 3) || null) : null;
   const atRiskColor = atRisk ? (state.lastKnownPlayers[atRisk.id]?.colorHex || '#e05151') : '#e05151';
-  const atRiskName = atRisk ? atRisk.name : '—';
+  const atRiskName = atRisk ? atRisk.name : '';
 
   const cardBg = isSafe ? 'rgba(39,174,96,0.1)' : 'rgba(224,81,81,0.07)';
   const cardBorder = isSafe ? 'rgba(39,174,96,0.45)' : 'rgba(224,81,81,0.28)';

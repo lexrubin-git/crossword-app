@@ -619,12 +619,13 @@ async function joinActiveMatch() {
     if (data.gameSettings?.gameEnded) { showToast('That match has already ended.'); return; }
     // Ensure this player exists in the lobby before joining the game
     if (state.myPlayerId) {
-      await set(ref(db, `lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`), {
+      const { update: fbUpdate } = window._fb;
+      await fbUpdate(ref(db, `lobbies/${state.activeLobbyCode}/players/${state.myPlayerId}`), {
         name: state.playerName,
         colorHex: state.playerColor.hex,
         avatar: state.pixelAvatarData || null,
         vote: null, voteMeta: null,
-        isHost: false, inGame: false,
+        inGame: false,
       }).catch(() => {});
     }
     sessionStorage.setItem('gameMode', data.gameMode || 'together');

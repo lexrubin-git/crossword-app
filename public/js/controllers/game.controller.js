@@ -2297,6 +2297,7 @@ async function sendGameChat() {
     const pointsBefore=gameScores[pId]||0;
     const result=processChatGuess(text,pId,pColor);
     if (result!==null) {
+      if (result.correct) recomputeScores();
       const pointsAfter=gameScores[pId]||0;
       const pointsEarned=result.correct?Math.max(0,pointsAfter-pointsBefore):0;
       const extra={isGuess:true,guessResult:result.correct?'correct':'wrong',filledBy:pId,playerId:pId,colorHex:pColor,points:pointsEarned};
@@ -2320,10 +2321,11 @@ function buildGameChatMsgEl(m) {
   const avatarStyle=m.avatar?`background-image:url(${m.avatar});background-color:${m.colorHex}`:`background-color:${m.colorHex}`;
   const isOwnMessage=(m.filledBy||m.playerId)===state.myPlayerId;
   let bodyHtml;
-  if (m.isGuess&&isOwnMessage) {
-    const guessColor=m.guessResult==='correct'?'#4caf7d':'#e05151';
-    const pointsTag=(m.guessResult==='correct'&&m.points)?` <em style="font-size:11px;color:var(--text3);font-weight:400">+${m.points} pt${m.points!==1?'s':''}</em>`:'';
-    bodyHtml=`<div class="game-chat-msg-text" style="color:${guessColor};font-weight:700">${m.text.replace(/</g,'&lt;')}${pointsTag}</div>`;
+  if (m.isGuess&&m.guessResult==='correct') {
+    const pointsTag=m.points?` <em style="font-size:11px;color:var(--text3);font-weight:400">+${m.points} pt${m.points!==1?'s':''}</em>`:'';
+    bodyHtml=`<div class="game-chat-msg-text" style="color:#4caf7d;font-weight:700">${m.text.replace(/</g,'&lt;')}${pointsTag}</div>`;
+  } else if (m.isGuess&&isOwnMessage) {
+    bodyHtml=`<div class="game-chat-msg-text" style="color:#e05151;font-weight:700">${m.text.replace(/</g,'&lt;')}</div>`;
   } else {
     bodyHtml=`<div class="game-chat-msg-text">${m.text.replace(/</g,'&lt;')}</div>`;
   }

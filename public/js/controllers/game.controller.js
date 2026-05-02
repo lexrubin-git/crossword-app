@@ -2086,7 +2086,7 @@ function applyGameSettings(settings) {
     if (settings.autocheck) {
       const tryAC=(n)=>{ if (window._snapshotLoaded) { runAutocheck(); if (state.isHost) recomputeScores(); renderGameScores(); } else if (n>0) setTimeout(()=>tryAC(n-1),150); };
       tryAC(10);
-    } else {
+    } else if (!chatGuessMode) {
       Object.values(cellElCache).forEach(el=>{ el.classList.remove('wrong','correct'); });
       document.querySelectorAll('.game-clue-item.completed').forEach(el=>{ el.classList.remove('completed'); const t=el.querySelector('.game-clue-text'); if (t) t.style.textDecoration=''; });
     }

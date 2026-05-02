@@ -711,6 +711,7 @@ function subscribeRankedFB() {
   const _stopGameSettingsRanked = onValue(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings`), snap => {
     const s = snap.val() || {};
     if (!window._rankedBannerShown) window._rankedBannerShown = new Set();
+    const wasAlreadyEliminated = _rankedEliminatedPlayers.has(state.myPlayerId);
     (s.rankedEliminated || []).forEach(id => _rankedEliminatedPlayers.add(id));
     if (s.rankedSpectators) {
       let spectatorChanged = false;
@@ -727,9 +728,11 @@ function subscribeRankedFB() {
     if (s.rankedLastElimId && !window._rankedBannerShown.has(bannerKey)) {
       window._rankedBannerShown.add(bannerKey);
       const isMe = s.rankedLastElimId === state.myPlayerId;
-      // "You're out" full overlay should only ever show once per player per game
       const meElimKey = 'me-eliminated';
-      if (!isMe || !window._rankedBannerShown.has(meElimKey)) {
+      // Only show "You're out" overlay if the player was NOT already eliminated before this snapshot
+      // and there isn't already an overlay on screen. This prevents re-firing across rounds.
+      const alreadyHasOverlay = !!document.getElementById('ranked-elim-overlay');
+      if (!isMe || (!wasAlreadyEliminated && !window._rankedBannerShown.has(meElimKey) && !alreadyHasOverlay)) {
         if (isMe) window._rankedBannerShown.add(meElimKey);
         showEliminationBanner(s.rankedLastElimName || 'A player', s.rankedLastElimColor || '#e05151', isMe);
       }

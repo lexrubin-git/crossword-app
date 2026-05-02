@@ -5,7 +5,8 @@ import { mountDrawBlock, bakeAvatarDataUrl, drawVectorCanvas, updateAvatarPrevie
 import {
   updatePlayer, removePlayer, transferHost, setLobbyMode as setLobbyModeFB,
   castVote, removeVoteFB, sendChatMessage, startLobbyGame, removeLobby,
-  subscribeLobby, subscribeChat, pruneStaleLobbies
+  subscribeLobby, subscribeChat, pruneStaleLobbies,
+  registerPlayerDisconnect, cancelPlayerDisconnect
 } from '../api.service.js';
 import { pickRandomPuzzle, formatNytDateLabel, parseNytPuzzle, PUZZLE_POOL } from '../puzzle.js';
 import { fetchNytPuzzle } from '../api.service.js';
@@ -216,6 +217,7 @@ async function ctxAction(action) {
       renderPlayerList();
       renderVoteGrid();
       renderStartBtn();
+      refreshLobbySwatches();
       showToast('Player kicked.');
     } catch { showToast('Could not kick player.'); }
   } else if (action === 'giveHost') {
@@ -627,7 +629,28 @@ async function joinActiveMatch() {
     }
     sessionStorage.setItem('gameMode', data.gameMode || 'together');
     sessionStorage.setItem('puzzleDateKey', data.puzzleDateKey);
-    window.location.href = 'game.html';
+    // Fetch fresh player list before navigating so new joiner sees correct names/colors
+    if (window._fb) {
+      const { get: get2, ref: ref2, db: db2 } = window._fb;
+      get2(ref2(db2, `lobbies/${state.activeLobbyCode}/players`)).then(snap2 => {
+        const freshPlayers = snap2.val() || {};
+        const merged = {};
+        Object.entries(freshPlayers).forEach(([id, p]) => {
+          if (!p) return;
+          merged[id] = {
+            name: p.name || 'Player',
+            colorHex: p.colorHex || '#888888',
+            avatar: p.avatar !== undefined ? p.avatar : null,
+            isHost: typeof p.isHost === 'boolean' ? p.isHost : false,
+            inGame: p.inGame || false,
+          };
+        });
+        try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(merged)); } catch {}
+        window.location.href = 'game.html';
+      }).catch(() => { window.location.href = 'game.html'; });
+    } else {
+      window.location.href = 'game.html';
+    }
   } catch { showToast('Could not join match.'); }
 }
 
@@ -1161,7 +1184,30 @@ async function _doStartGame() {
         });
       } catch {}
     }
-    window.location.href = 'game.html';
+    // Write complete fresh player data right before navigating
+    if (window._fb) {
+      const { get, ref, db } = window._fb;
+      get(ref(db, `lobbies/${state.activeLobbyCode}/players`)).then(snap => {
+        const fresh = {};
+        Object.entries(snap.val() || {}).forEach(([id, p]) => {
+          if (!p) return;
+          fresh[id] = {
+            name: p.name || state.lastKnownPlayers[id]?.name || 'Player',
+            colorHex: p.colorHex || state.lastKnownPlayers[id]?.colorHex || '#888888',
+            avatar: p.avatar !== undefined ? p.avatar : (state.lastKnownPlayers[id]?.avatar || null),
+            isHost: typeof p.isHost === 'boolean' ? p.isHost : false,
+            inGame: p.inGame || false,
+          };
+        });
+        console.log('[LOBBY PRE-NAV] writing lastKnownPlayers:', JSON.stringify(fresh));
+        sessionStorage.setItem('lastKnownPlayers', JSON.stringify(fresh));
+      }).catch(() => {
+        try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+      }).finally(() => { window.location.href = 'game.html'; });
+    } else {
+      try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+      window.location.href = 'game.html';
+    }
   } catch (e) {
     showToast('Failed to load puzzle: ' + e.message.slice(0, 60));
     if (btn) { btn.disabled = false; btn.textContent = 'Start game →'; }
@@ -1227,11 +1273,42 @@ state.lastKnownPlayers[state.myPlayerId] = {
     voteMeta: null,
     isHost: state.isHost || false,
     inGame: false,
+  }).then(() => {
+    registerPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
   }).catch(() => {});
 }
 
 subscribeChatFB();
 subscribeLobbyFB();
+
+// Eagerly fetch all players so color swatches show taken colors immediately for new joiners
+if (state.activeLobbyCode && window._fb) {
+  const { get, ref, db } = window._fb;
+  get(ref(db, `lobbies/${state.activeLobbyCode}/players`)).then(snap => {
+    if (!snap.exists()) return;
+    const players = snap.val() || {};
+    Object.entries(players).forEach(([id, p]) => {
+      if (!p || id === state.myPlayerId) return;
+      if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
+      state.lastKnownPlayers[id].name = p.name || 'Player';
+      state.lastKnownPlayers[id].colorHex = p.colorHex || '#888';
+      if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
+      if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
+    });
+    refreshLobbySwatches();
+    renderPlayerList();
+  }).catch(() => {});
+}
+
+// Persist session for rejoin on page close
+localStorage.setItem('cwf_session', JSON.stringify({
+  lobbyCode: state.activeLobbyCode,
+  playerId: state.myPlayerId,
+  playerName: state.playerName,
+  colorHex: state.playerColor.hex,
+  avatar: state.pixelAvatarData || null,
+  savedAt: Date.now(),
+}));
 
   // Fallback: if after 2 seconds we still only see ourselves, do a one-time get
   setTimeout(() => {
@@ -1277,7 +1354,7 @@ function subscribeLobbyFB() {
       Object.entries(players).forEach(([id, p]) => {
         if (id === state.myPlayerId) return;
         state.lastKnownPlayers[id] = {
-          name:     p.name     || '',
+          name:     (p.name && p.name.trim()) ? p.name : 'Player',
           colorHex: p.colorHex || '#888888',
           avatar:   p.avatar   || null,
           vote:     p.vote     || null,
@@ -1307,7 +1384,8 @@ function subscribeLobbyFB() {
     console.log('subscription fired, players:', JSON.stringify(players));
     if (!Object.keys(players).length) {
       console.log('subscription got empty players, lastKnownPlayers:', JSON.stringify(state.lastKnownPlayers));
-      return;
+      // Only bail if we haven't received a valid snapshot yet — otherwise trust the empty list
+      if (!_hasReceivedValidSnapshot) return;
     }
     // Merge incoming players with existing state, preserving local data for missing fields
     // Start with existing players, then merge incoming on top
@@ -1319,7 +1397,7 @@ function subscribeLobbyFB() {
         incoming[id] = existing;
       } else {
         incoming[id] = {
-          name:     p.name     || existing.name     || '',
+          name:     (p.name && p.name.trim()) ? p.name : (existing.name || 'Player'),
           colorHex: p.colorHex || existing.colorHex || '#888888',
           avatar:   p.avatar   !== undefined ? p.avatar   : (existing.avatar   || null),
           vote:     p.vote     || null,
@@ -1422,7 +1500,32 @@ function subscribeLobbyFB() {
         sessionStorage.setItem('puzzleDateKey', puzzleKey);
         sessionStorage.removeItem('returningFromGame');
         sessionStorage.removeItem('freshGameStart');
-        window.location.href = 'game.html';
+        // Fetch fresh player list right before navigating so mid-game joiners get current data
+        if (window._fb) {
+          const { get, ref, db } = window._fb;
+          get(ref(db, `lobbies/${state.activeLobbyCode}/players`)).then(snap => {
+            const freshPlayers = snap.val() || {};
+            const merged = {};
+            Object.entries(freshPlayers).forEach(([id, p]) => {
+              if (!p) return;
+              merged[id] = {
+                name: p.name || state.lastKnownPlayers[id]?.name || 'Player',
+                colorHex: p.colorHex || state.lastKnownPlayers[id]?.colorHex || '#888888',
+                avatar: p.avatar !== undefined ? p.avatar : (state.lastKnownPlayers[id]?.avatar || null),
+                isHost: typeof p.isHost === 'boolean' ? p.isHost : (state.lastKnownPlayers[id]?.isHost || false),
+                inGame: p.inGame || false,
+              };
+            });
+            try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(merged)); } catch {}
+            window.location.href = 'game.html';
+          }).catch(() => {
+            try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+            window.location.href = 'game.html';
+          });
+        } else {
+          try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+          window.location.href = 'game.html';
+        }
         return;
       }
     }
@@ -1497,6 +1600,7 @@ async function leaveLobby(skipConfirm = false) {
   if (lobbyListener) { lobbyListener(); lobbyListener = null; }
   if (chatListener)  { chatListener();  chatListener  = null; }
   if (state.activeLobbyCode && state.myPlayerId) {
+    cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
     try {
       if (state.isHost) {
         const others = Object.keys(state.lastKnownPlayers).filter(id => id !== state.myPlayerId);
@@ -1509,6 +1613,7 @@ async function leaveLobby(skipConfirm = false) {
       await removePlayer(state.activeLobbyCode, state.myPlayerId);
     } catch {}
   }
+  localStorage.removeItem('cwf_session');
   state.activeLobbyCode = null; state.myPlayerId = null; state.isHost = false; state.lastLobbyData = null;
   state.myVote = null; state.lastKnownPlayers = {};
   state._seenInLobby = false;

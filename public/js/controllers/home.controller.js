@@ -35,6 +35,11 @@ function confirmProfile() {
   }
   const avatarData = bakeAvatarDataUrl();
   if (avatarData) state.pixelAvatarData = avatarData;
+  localStorage.setItem('cwf_identity', JSON.stringify({
+    playerName: state.playerName,
+    colorHex: state.playerColor.hex,
+    avatar: state.pixelAvatarData || null,
+  }));
   closeOverlay('profile-overlay');
   updateChip();
 }
@@ -170,6 +175,11 @@ async function doJoin() {
     state.activeLobbyCode = code;
     state.isHost         = false;
     state.myPlayerId     = playerId;
+    localStorage.setItem('cwf_identity', JSON.stringify({
+      playerName: name,
+      colorHex: playerColor.hex,
+      avatar: state.pixelAvatarData || null,
+    }));
     sessionStorage.setItem('lobbyState', JSON.stringify({
       activeLobbyCode: code,
       myPlayerId: playerId,
@@ -200,6 +210,11 @@ async function goToLobby() {
     state.activeLobbyCode = code;
     state.isHost          = true;
     state.myPlayerId      = playerId;
+    localStorage.setItem('cwf_identity', JSON.stringify({
+      playerName: state.playerName,
+      colorHex: state.playerColor.hex,
+      avatar: state.pixelAvatarData || null,
+    }));
     sessionStorage.setItem('lobbyState', JSON.stringify({
       activeLobbyCode: code,
       myPlayerId: playerId,
@@ -272,6 +287,75 @@ async function confirmPuzzlePick() {
   }
 }
 
+// ── Rejoin session ──
+async function checkRejoinSession() {
+  try {
+    const raw = localStorage.getItem('cwf_session');
+    if (!raw) return;
+    const session = JSON.parse(raw);
+    if (!session.lobbyCode || Date.now() - session.savedAt > 2 * 60 * 60 * 1000) {
+      localStorage.removeItem('cwf_session');
+      return;
+    }
+    const { get, ref, db } = window._fb;
+    const snap = await get(ref(db, `lobbies/${session.lobbyCode}`));
+    if (!snap.exists()) { localStorage.removeItem('cwf_session'); return; }
+    const data = snap.val();
+    if (!data.players?.[session.playerId] && data.status !== 'started') { localStorage.removeItem('cwf_session'); return; }
+
+    const banner = document.getElementById('rejoin-banner');
+    if (!banner) return;
+    const isInGame = data.status === 'started' && !data.gameSettings?.gameEnded;
+    document.getElementById('rejoin-label').textContent = isInGame ? 'Rejoin active match?' : 'Rejoin lobby?';
+    document.getElementById('rejoin-sublabel').innerHTML = `Code: ${session.lobbyCode} · <span style="color:${session.colorHex};font-weight:700">${session.playerName}</span>`;
+    banner.style.display = 'flex';
+
+    document.getElementById('rejoin-btn').addEventListener('click', () => {
+      banner.style.display = 'none';
+      state.activeLobbyCode  = session.lobbyCode;
+      state.myPlayerId       = session.playerId;
+      state.playerName       = session.playerName;
+      state.isHost           = data.players[session.playerId]?.isHost || false;
+      if (session.avatar) state.pixelAvatarData = session.avatar;
+      const found = COLORS.find(c => c.hex === session.colorHex);
+      if (found) state.playerColor = found;
+      sessionStorage.setItem('lobbyState', JSON.stringify({
+        activeLobbyCode: session.lobbyCode,
+        myPlayerId:      session.playerId,
+        isHost:          state.isHost,
+        playerName:      session.playerName,
+        playerColorHex:  session.colorHex,
+        pixelAvatarData: session.avatar || null,
+      }));
+      const rejoinPlayerData = {
+        name: session.playerName,
+        colorHex: session.colorHex,
+        avatar: session.avatar || null,
+        vote: null,
+        voteMeta: null,
+        isHost: state.isHost,
+        inGame: false,
+      };
+      if (window._fb) {
+        const { set, ref, db } = window._fb;
+        set(ref(db, `lobbies/${session.lobbyCode}/players/${session.playerId}`), rejoinPlayerData).catch(() => {});
+      }
+      if (isInGame) {
+        sessionStorage.setItem('gameMode', data.gameMode || 'together');
+        sessionStorage.setItem('puzzleDateKey', data.pendingPuzzleDateKey || data.puzzleDateKey || '');
+        window._isRejoin = true;
+        window.location.href = '/pages/game.html';
+      } else {
+        window.location.href = '/pages/lobby.html';
+      }
+    });
+
+    
+  } catch {
+    localStorage.removeItem('cwf_session');
+  }
+}
+
 // ── URL-based auto-join ──
 function checkUrlLobbyCode() {
   const params = new URLSearchParams(window.location.search);
@@ -301,6 +385,7 @@ function init() {
   updateChip();
   updatePickerPreview();
   checkUrlLobbyCode();
+  checkRejoinSession();
 
   // Wire all buttons via addEventListener (no inline onclick in HTML)
   document.getElementById('btn-create-lobby')?.addEventListener('click', goToLobby);
@@ -333,7 +418,22 @@ function init() {
 }
 
 // Wait for Firebase, then init
+function loadPersistedIdentity() {
+  try {
+    const raw = localStorage.getItem('cwf_identity');
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    if (saved.playerName) state.playerName = saved.playerName;
+    if (saved.colorHex) {
+      const found = COLORS.find(c => c.hex === saved.colorHex);
+      if (found) state.playerColor = found;
+    }
+    if (saved.avatar) state.pixelAvatarData = saved.avatar;
+  } catch {}
+}
+
 function waitAndInit() {
+  loadPersistedIdentity();
   if (window._fbReady) { init(); }
   else { document.addEventListener('fb-ready', init, { once: true }); }
 }

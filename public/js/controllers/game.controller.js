@@ -11,9 +11,34 @@ import {
   pushVersusPlayerCellToFB, fetchVersusPlayerGrid, clearVersusPlayerGrid,
   setPlayerInGame, clearGameGridFB,
   transferHost, removePlayer, updatePlayer,
+  registerPlayerDisconnect, cancelPlayerDisconnect,
 } from '../api.service.js';
 import { parseNytPuzzle, formatNytDateLabel } from '../puzzle.js';
 import { fetchNytPuzzle } from '../api.service.js';
+
+// ── Restore lastKnownPlayers immediately from sessionStorage on page load ──
+// This must happen before anything else so all renders have correct player data
+try {
+  const _savedPlayers = sessionStorage.getItem('lastKnownPlayers');
+  if (_savedPlayers) {
+    const _parsed = JSON.parse(_savedPlayers);
+    Object.entries(_parsed).forEach(([id, p]) => {
+      if (!p) return;
+      state.lastKnownPlayers[id] = {
+        name: p.name || 'Player',
+        colorHex: p.colorHex || '#888888',
+        avatar: p.avatar || null,
+        isHost: typeof p.isHost === 'boolean' ? p.isHost : false,
+        inGame: p.inGame || false,
+      };
+    });
+  }
+} catch {}
+
+// ── Debug: log what we have immediately after module load ──
+console.log('[GAME MODULE LOAD] lastKnownPlayers:', JSON.stringify(state.lastKnownPlayers));
+console.log('[GAME MODULE LOAD] sessionStorage lastKnownPlayers:', sessionStorage.getItem('lastKnownPlayers'));
+console.log('[GAME MODULE LOAD] myPlayerId:', state.myPlayerId, 'isHost:', state.isHost);
 
 // ── Game state ──
 let currentMap    = null;
@@ -873,7 +898,9 @@ function enterGame(map, gameMode) {
   // Mark in-game
   if (state.activeLobbyCode && state.myPlayerId) {
     setPlayerInGame(state.activeLobbyCode, state.myPlayerId, true);
+    registerPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
   }
+  console.log('[enterGame] lastKnownPlayers after setPlayerInGame:', JSON.stringify(state.lastKnownPlayers));
 
   // Init grid
   gameGrid = Array.from({length:size}, () =>
@@ -892,6 +919,14 @@ function enterGame(map, gameMode) {
   gameScores = {};
   Object.keys(state.lastKnownPlayers).forEach(id => { gameScores[id] = 0; });
   if (state.myPlayerId && !gameScores[state.myPlayerId]) gameScores[state.myPlayerId] = 0;
+  // Ensure self is always in lastKnownPlayers with correct isHost flag
+  if (state.myPlayerId) {
+    if (!state.lastKnownPlayers[state.myPlayerId]) state.lastKnownPlayers[state.myPlayerId] = {};
+    state.lastKnownPlayers[state.myPlayerId].name = state.playerName;
+    state.lastKnownPlayers[state.myPlayerId].colorHex = state.playerColor.hex;
+    state.lastKnownPlayers[state.myPlayerId].avatar = state.pixelAvatarData || null;
+    state.lastKnownPlayers[state.myPlayerId].isHost = state.isHost;
+  }
 
   // Timer
   gameTimerSec = 0;
@@ -935,6 +970,8 @@ function enterGame(map, gameMode) {
   if (gcs) gcs.disabled = true;
   const gci = document.getElementById('game-chat-input');
   if (gci) gci.value = '';
+
+  
 
   // Render
   renderGameGrid(size, cellNum, blackSet);
@@ -1114,16 +1151,76 @@ function enterGame(map, gameMode) {
 
   _stopScoreSync = startScoreSyncListener(state.activeLobbyCode, snap => {
     const data = snap.val() || {};
-    const knownIds = new Set(Object.keys(state.lastKnownPlayers));
-    if (state.myPlayerId) knownIds.add(state.myPlayerId);
     Object.entries(data).forEach(([id, entry]) => {
-      if (knownIds.has(id)) gameScores[id] = entry.score || 0;
+      gameScores[id] = entry.score || 0;
+      // Only fill gaps — never overwrite good data from lastKnownPlayers
+      if (id !== state.myPlayerId) {
+        const existing = state.lastKnownPlayers[id];
+        // Only create entry from scores if we have a real name (not just defaults)
+        if (entry.name && entry.name !== 'Player' && entry.colorHex && entry.colorHex !== '#888') {
+          if (!existing) state.lastKnownPlayers[id] = {};
+          if (!state.lastKnownPlayers[id].name || state.lastKnownPlayers[id].name === 'Player') {
+            state.lastKnownPlayers[id].name = entry.name;
+          }
+          if (!state.lastKnownPlayers[id].colorHex || state.lastKnownPlayers[id].colorHex === '#888' || state.lastKnownPlayers[id].colorHex === '#888888') {
+            state.lastKnownPlayers[id].colorHex = entry.colorHex;
+          }
+          if (!state.lastKnownPlayers[id].avatar && entry.avatar) {
+            state.lastKnownPlayers[id].avatar = entry.avatar;
+          }
+        }
+      }
     });
     renderGameScores();
   });
 
+  
+
+  // Ensure all known players have a gameScores entry
+  Object.keys(state.lastKnownPlayers).forEach(id => {
+    if (!gameScores[id]) gameScores[id] = 0;
+  });
+
   _stopPlayerInfo = startPlayerInfoListener(state.activeLobbyCode, snap => {
     const players = snap.val() || {};
+    Object.entries(players).forEach(([id, p]) => {
+      if (!p || id === state.myPlayerId) return;
+      if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
+      state.lastKnownPlayers[id].name = p.name || state.lastKnownPlayers[id].name || 'Player';
+      state.lastKnownPlayers[id].colorHex = p.colorHex || state.lastKnownPlayers[id].colorHex || '#888';
+      if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
+      if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
+      if (!gameScores[id]) gameScores[id] = 0;
+    });
+    try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+    renderGameScores();
+    // Re-trigger versus preview so new mid-game joiners appear immediately for existing players
+    if ((window._gameMode === 'versus' || window._gameMode === 'ranked') && _stopVersusGrid) {
+      const wrap = document.getElementById('versus-previews-wrap');
+      if (wrap) {
+        wrap.querySelectorAll('.versus-preview-player').forEach(div => {
+          const pid = div.dataset.playerId;
+          if (!pid || !state.lastKnownPlayers[pid]) return;
+          const p = state.lastKnownPlayers[pid];
+          const nameEl = div.querySelector('div[style*="text-align:center"]');
+          const avatarEl = div.querySelector('div[style*="border-radius:50%"]');
+          if (nameEl && p.name && nameEl.textContent === 'Player') {
+            nameEl.textContent = p.name;
+            nameEl.style.color = p.colorHex || '#888';
+          }
+          if (avatarEl && p.colorHex) {
+            avatarEl.style.backgroundColor = p.colorHex;
+            avatarEl.style.borderColor = p.colorHex;
+            if (p.avatar) {
+              avatarEl.style.backgroundImage = `url(${p.avatar})`;
+              avatarEl.textContent = '';
+            } else if (avatarEl.textContent === 'P') {
+              avatarEl.textContent = (p.name || '?').charAt(0).toUpperCase();
+            }
+          }
+        });
+      }
+    }
 
     // FIX: kicked detection — if we're no longer in the players list, redirect
     if (state.myPlayerId && !players[state.myPlayerId] && !state.isHost) {
@@ -1131,6 +1228,23 @@ function enterGame(map, gameMode) {
       showToast('You were kicked from the game.');
       setTimeout(() => { window.location.href = 'index.html'; }, 1200);
       return;
+    }
+    // Remove players who have left the Firebase players list
+    // Only remove if we have received a full snapshot (multiple players present)
+    // to avoid deleting players due to momentary incomplete snapshots
+    if (Object.keys(players).length > 1 || Object.keys(state.lastKnownPlayers).filter(id => id !== state.myPlayerId).length === 0) {
+      Object.keys(state.lastKnownPlayers).forEach(id => {
+        if (id !== state.myPlayerId && !players[id]) {
+          delete state.lastKnownPlayers[id];
+          delete gameScores[id];
+          const wrap = document.getElementById('versus-previews-wrap');
+          if (wrap) {
+            wrap.querySelectorAll('.versus-preview-player').forEach(div => {
+              if (div.dataset.playerId === id) div.remove();
+            });
+          }
+        }
+      });
     }
 
     // Auto-spectate: if joining ranked mid-match and not already eliminated or spectating
@@ -1192,8 +1306,9 @@ function enterGame(map, gameMode) {
       if (!p) return;
       if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
       const prev = state.lastKnownPlayers[id].colorHex;
-      if (p.name) state.lastKnownPlayers[id].name = p.name;
-      if (p.colorHex) state.lastKnownPlayers[id].colorHex = p.colorHex;
+      // Prefer Firebase data but never downgrade a real name/color to empty
+      state.lastKnownPlayers[id].name = (p.name && p.name !== 'Player') ? p.name : (state.lastKnownPlayers[id].name || p.name || 'Player');
+      state.lastKnownPlayers[id].colorHex = (p.colorHex && p.colorHex !== '#888' && p.colorHex !== '#888888') ? p.colorHex : (state.lastKnownPlayers[id].colorHex || p.colorHex || '#888888');
       if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
       if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
 
@@ -1767,13 +1882,18 @@ function recomputeScores() {
 function renderGameScores() {
   const list=document.getElementById('game-score-list');
   if (!list) return;
+  console.log('[renderGameScores] lastKnownPlayers:', JSON.stringify(state.lastKnownPlayers));
   const meId=state.myPlayerId;
   const knownIds=new Set(Object.keys(state.lastKnownPlayers));
   if (meId) knownIds.add(meId);
+  
   const sorted=[...knownIds].map(id=>[id,gameScores[id]||0]).sort((a,b)=>b[1]-a[1]);
   list.innerHTML='';
   sorted.forEach(([id,score])=>{
-    const p=state.lastKnownPlayers[id]||(id===meId?{name:state.playerName||'Player',colorHex:state.playerColor.hex||'#888',avatar:state.pixelAvatarData||null}:null);
+    const raw=state.lastKnownPlayers[id]||{};
+    const p=id===meId
+      ? {name:state.playerName||raw.name||'Player',colorHex:state.playerColor.hex||raw.colorHex||'#888',avatar:state.pixelAvatarData||raw.avatar||null}
+      : {name:raw.name||'Player',colorHex:raw.colorHex||'#888888',avatar:raw.avatar||null,...raw};
     if (!p) return;
     const isGone=state.lastKnownPlayers[id]&&(state.lastKnownPlayers[id]._disconnected||state.lastKnownPlayers[id]._kicked);
     const isRankedSpectator = window._gameMode==='ranked' && _rankedSpectatorIds.has(id);
@@ -1785,7 +1905,8 @@ function renderGameScores() {
     const avatarStyle=displayP.avatar?`background-image:url(${displayP.avatar});background-color:${displayP.colorHex}`:`background-color:${displayP.colorHex}`;
     const initial=(displayP.name||'?').charAt(0).toUpperCase();
     // FIX 6: host tag next to score, not name
-    const hostTag=state.lastKnownPlayers[id]?.isHost?'<span class="player-badge host" style="margin-left:6px">host</span>':'';
+    const isHostPlayer = id === meId ? state.isHost : (state.lastKnownPlayers[id]?.isHost || false);
+    const hostTag=isHostPlayer?'<span class="player-badge host" style="margin-left:6px">host</span>':'';
     const isElim = window._gameMode==='ranked' && _rankedEliminatedPlayers.has(id) && !_rankedSpectatorIds.has(id);
     const isSpectator = window._gameMode==='ranked' && (_rankedSpectatorIds.has(id) || (id===state.myPlayerId && window._isSpectatorJoin));
     // Apply faded opacity for eliminated players, but not spectatorss
@@ -2337,8 +2458,17 @@ function startVersusGridPreview() {
     let anyOther=false;
     Object.entries(data).forEach(([id,grid])=>{
       if (id===state.myPlayerId||!grid?.cells||!grid.size) return;
-      // Only show players who are currently in this lobby — filter out stale entries from previous games
-      if (!state.lastKnownPlayers[id]) return;
+      // Seed lastKnownPlayers from versus grid data if we don't have this player yet
+      if (!state.lastKnownPlayers[id]) {
+        state.lastKnownPlayers[id] = {
+          name: grid.name || 'Player',
+          colorHex: grid.colorHex || '#888888',
+          avatar: null,
+          isHost: false,
+          inGame: true,
+        };
+        if (!gameScores[id]) gameScores[id] = 0;
+      }
       anyOther=true;
       const name=grid.name||state.lastKnownPlayers[id]?.name||'Player';
       const colorHex=grid.colorHex||state.lastKnownPlayers[id]?.colorHex||'#888';
@@ -2527,6 +2657,10 @@ function leaveGame() {
 
 function doLeaveGame() {
   closeOverlay('leave-confirm-overlay');
+  localStorage.removeItem('cwf_session');
+  if (state.activeLobbyCode && state.myPlayerId) {
+    cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
+  }
   stopAllListeners();
   if (state.activeLobbyCode&&state.myPlayerId&&window._fb) {
     const {remove,ref,db}=window._fb;
@@ -2538,6 +2672,9 @@ function doLeaveGame() {
 }
 
 async function playAgain() {
+  if (state.activeLobbyCode && state.myPlayerId) {
+    cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
+  }
   stopAllListeners();
   window._joiningGame=false; window._gameMode='together';
   closeOverlay('game-over-overlay');
@@ -2559,6 +2696,9 @@ function goBackToLobby() {
 
 async function doGoBackToLobby() {
   closeOverlay('back-to-lobby-confirm-overlay');
+  if (state.activeLobbyCode && state.myPlayerId) {
+    cancelPlayerDisconnect(state.activeLobbyCode, state.myPlayerId);
+  }
   stopAllListeners();
   window._joiningGame=false; window._gameMode='together';
   closeOverlay('game-over-overlay');
@@ -2640,13 +2780,21 @@ async function gameCtxAction(action) {
   if (!_gameCtxTargetId||!state.activeLobbyCode) return;
   if (action==='kick') {
     removePlayer(state.activeLobbyCode,_gameCtxTargetId).catch(()=>{});
-    if (state.lastKnownPlayers[_gameCtxTargetId]) { state.lastKnownPlayers[_gameCtxTargetId]._kicked=true; state.lastKnownPlayers[_gameCtxTargetId]._disconnected=false; }
     if (window._gameMode === 'ranked' && window._fb && state.activeLobbyCode) {
       _rankedSpectatorIds.add(_gameCtxTargetId);
       const { update, ref, db } = window._fb;
       update(ref(db, `lobbies/${state.activeLobbyCode}/gameSettings/rankedSpectators`), {
         [_gameCtxTargetId]: true
       }).catch(() => {});
+    }
+    delete state.lastKnownPlayers[_gameCtxTargetId];
+    delete gameScores[_gameCtxTargetId];
+    // Remove versus preview card immediately
+    const wrap = document.getElementById('versus-previews-wrap');
+    if (wrap) {
+      wrap.querySelectorAll('.versus-preview-player').forEach(div => {
+        if (div.dataset.playerId === _gameCtxTargetId) div.remove();
+      });
     }
     renderGameScores(); showToast('Player kicked.');
   } else if (action==='giveHost') {
@@ -2761,7 +2909,26 @@ if (!puzzleJson) {
     };
     verifyDateKey().then(resolvedDateKey => {
       if (resolvedDateKey !== dateKey) sessionStorage.setItem('puzzleDateKey', resolvedDateKey);
-      return fetchNytPuzzle(resolvedDateKey);
+      // Pre-populate lastKnownPlayers from Firebase BEFORE loading puzzle so renders have correct data
+      const playerPrefetch = (state.activeLobbyCode && window._fb)
+        ? (() => {
+            const { get, ref, db } = window._fb;
+            return get(ref(db, `lobbies/${state.activeLobbyCode}/players`)).then(snap => {
+              const players = snap.val() || {};
+              Object.entries(players).forEach(([id, p]) => {
+                if (!p) return;
+                if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
+                state.lastKnownPlayers[id].name = p.name || state.lastKnownPlayers[id].name || 'Player';
+                state.lastKnownPlayers[id].colorHex = p.colorHex || state.lastKnownPlayers[id].colorHex || '#888888';
+                if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
+                if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
+                if (id === state.myPlayerId) state.isHost = p.isHost || state.isHost;
+              });
+              try { sessionStorage.setItem('lastKnownPlayers', JSON.stringify(state.lastKnownPlayers)); } catch {}
+            }).catch(() => {});
+          })()
+        : Promise.resolve();
+      return playerPrefetch.then(() => fetchNytPuzzle(resolvedDateKey));
     }).then(rawData => {
       const dateKeyFinal = sessionStorage.getItem('puzzleDateKey') || dateKey;
       const puzzle = parseNytPuzzle(rawData, dateKeyFinal);
@@ -2847,9 +3014,31 @@ if (!puzzleJson) {
 }
 
 function waitAndInit() {
-  if (window._fbReady) init();
-  else document.addEventListener('fb-ready', init, { once: true });
+  if (window._fbReady) prefetchPlayersAndInit();
+  else document.addEventListener('fb-ready', prefetchPlayersAndInit, { once: true });
 }
+
+async function prefetchPlayersAndInit() {
+  init();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  try {
+    const saved = sessionStorage.getItem('lastKnownPlayers');
+    if (!saved) return;
+    const parsed = JSON.parse(saved);
+    Object.entries(parsed).forEach(([id, p]) => {
+      if (id === state.myPlayerId || !p.name || !p.colorHex) return;
+      if (!state.lastKnownPlayers[id]) state.lastKnownPlayers[id] = {};
+      state.lastKnownPlayers[id].name = p.name || state.lastKnownPlayers[id].name;
+      state.lastKnownPlayers[id].colorHex = p.colorHex || state.lastKnownPlayers[id].colorHex;
+      if (p.avatar !== undefined) state.lastKnownPlayers[id].avatar = p.avatar;
+      if (typeof p.isHost === 'boolean') state.lastKnownPlayers[id].isHost = p.isHost;
+    });
+    renderGameScores();
+  } catch {}
+});
 
 // Expose globals needed by any lingering inline handlers
 window.goBackToLobby   = goBackToLobby;

@@ -859,6 +859,7 @@ function enterGame(map, gameMode) {
   window._joiningGame = false;
   window._puzzleCompletionAllowed = false;
   window._snapshotLoaded = false;
+  window._gameLoadTs = Date.now();
   autocheckEnabled = false;
   chatGuessMode = false;
   chatGuessHard = false;
@@ -953,6 +954,7 @@ function enterGame(map, gameMode) {
       if (snap.exists()) {
         const ts = snap.val();
         window._lastGameStartedAt = ts;
+        window._gameLoadTs = null; // startedAt known; no longer need the fallback
         const elapsed = Math.floor((Date.now() - ts) / 1000);
         gameTimerSec = Math.max(0, elapsed);
       } else {
@@ -1089,8 +1091,10 @@ function enterGame(map, gameMode) {
       if (_stopGameChat) { _stopGameChat(); _stopGameChat = null; }
       _stopGameChat = startGameChatListener(state.activeLobbyCode, snap => {
         const msgs = snap.val();
-        if (!msgs) return;
-        const list = Object.values(msgs).sort((a,b) => a.ts - b.ts);
+        let list = msgs ? Object.values(msgs).sort((a,b) => a.ts - b.ts) : [];
+        // Filter stale messages from previous sessions before Firebase delete propagates
+        const minTs = window._lastGameStartedAt || (window._gameLoadTs != null ? window._gameLoadTs - 5000 : 0);
+        if (minTs) list = list.filter(m => !m.ts || m.ts >= minTs);
         renderGameChatMessages(list);
       });
 

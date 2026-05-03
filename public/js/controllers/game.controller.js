@@ -2617,16 +2617,18 @@ function showGameOver() {
     else {
       winnerAvatarEl.style.display='';
       if (sorted.length) {
-        const [winnerId]=sorted[0];
+        const rankedWinner = isRanked ? sorted.find(([id]) => !_rankedEliminatedPlayers.has(id)) : null;
+        const winnerId = rankedWinner ? rankedWinner[0] : sorted[0][0];
         const wp=state.lastKnownPlayers[winnerId]||(winnerId===meId?{name:state.playerName,colorHex:state.playerColor.hex,avatar:state.pixelAvatarData||null}:{name:'Player',colorHex:'#888',avatar:null});
         if (wp.avatar) { winnerAvatarEl.style.backgroundImage=`url(${wp.avatar})`; winnerAvatarEl.style.backgroundColor=wp.colorHex; winnerAvatarEl.textContent=''; }
         else { winnerAvatarEl.style.backgroundImage=''; winnerAvatarEl.style.backgroundColor=wp.colorHex; winnerAvatarEl.textContent=(wp.name||'?').charAt(0).toUpperCase(); winnerAvatarEl.style.display='flex'; winnerAvatarEl.style.alignItems='center'; winnerAvatarEl.style.justifyContent='center'; winnerAvatarEl.style.lineHeight='1'; }
       }
     }
   }
+  const rankedWinnerId = isRanked ? (sorted.find(([id]) => !_rankedEliminatedPlayers.has(id))||sorted[0])[0] : null;
   sorted.forEach(([id,score],i)=>{
     const p=state.lastKnownPlayers[id]||(id===meId?{name:state.playerName,colorHex:state.playerColor.hex,avatar:state.pixelAvatarData||null}:{name:'Player',colorHex:'#888'});
-    const isWinner=i===0&&score===topScore;
+    const isWinner=isRanked ? id===rankedWinnerId : (i===0&&score===topScore);
     const row=document.createElement('div');
     row.className='game-over-row'+(!isTogetherMode&&isWinner?' winner':'');
     const initial=(p.name||'?').charAt(0).toUpperCase();
@@ -2638,7 +2640,7 @@ function showGameOver() {
         <span class="game-over-name" style="color:${p.colorHex}">${p.name||'Player'}</span>
         ${!isTogetherMode&&isWinner?'<span class="game-over-winner-tag">Winner</span>':''}
       </div>
-      <div class="game-over-score">${score} pt${score!==1?'s':''}</div>
+      ${isRanked?'':'<div class="game-over-score">'+score+' pt'+(score!==1?'s':'')+'</div>'}
     `;
     podium.appendChild(row);
   });
